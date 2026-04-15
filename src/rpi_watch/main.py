@@ -15,7 +15,7 @@ from typing import Optional
 
 import yaml
 
-from .display import GC9A01_I2C, MetricRenderer
+from .display import GC9A01_SPI, MetricRenderer
 from .metrics import MetricStore
 from .mqtt import MQTTSubscriber
 from .utils import setup_logging
@@ -77,9 +77,13 @@ class RPiWatch:
         try:
             # Initialize display
             display_config = self.config.get('display', {})
-            self.display = GC9A01_I2C(
-                i2c_address=int(display_config.get('i2c_address', '0x3C'), 0),
-                i2c_bus=display_config.get('i2c_bus', 1)
+            self.display = GC9A01_SPI(
+                spi_bus=display_config.get('spi_bus', 0),
+                spi_device=display_config.get('spi_device', 0),
+                spi_speed=display_config.get('spi_speed', 10000000),
+                dc_pin=display_config.get('spi_dc_pin', 24),
+                reset_pin=display_config.get('spi_reset_pin', 25),
+                cs_pin=display_config.get('spi_cs_pin', 8),
             )
             self.display.connect()
             self.display.init_display()
