@@ -5,9 +5,9 @@ display:
   spi_speed: 10000000        # Clock speed 10 MHz (can go up to 40-50 MHz)
 
   # GPIO Pin Configuration (BCM numbering)
-  spi_dc_pin: 24             # GPIO 24 - Data/Command line
-  spi_reset_pin: 25          # GPIO 25 - Reset line
-  spi_cs_pin: 8              # GPIO 8 - Chip Select (optional, can tie to GND)
+  spi_dc_pin: 4              # GPIO 4 - Data/Command line (DC/RS)
+  spi_reset_pin: 2           # GPIO 2 - Reset line (RES)
+  spi_cs_pin: 5              # GPIO 5 - Chip Select (CS)
 
   # Display Settings
   width: 240
