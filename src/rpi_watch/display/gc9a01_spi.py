@@ -354,6 +354,10 @@ class GC9A01_SPI:
             self._write_command(self.CMD_DISPLAY_ON)
             time.sleep(0.150)  # 150ms delay as per Adafruit
 
+            # Enable Inter-Register access
+            self._write_command_data(0xFE, bytes([0x00])) # Inter Register Enable 1
+            self._write_command_data(0xEF, bytes([0x00])) # Inter Register Enable 2
+
             # ===== Brightness Control =====
             logger.debug("Setting brightness to maximum")
             self._write_command_data(self.CMD_BRIGHTNESS, bytes([0xFF]))  # Max brightness

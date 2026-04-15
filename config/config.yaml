@@ -2,7 +2,7 @@ display:
   # SPI Configuration (Raspberry Pi hardware SPI)
   spi_bus: 0                 # SPI bus 0 (/dev/spidev0.x)
   spi_device: 0              # SPI device 0 (/dev/spidev0.0)
-  spi_speed: 10000000        # Clock speed 10 MHz (can go up to 40-50 MHz)
+  spi_speed: 1000000        # Clock speed 1 MHz (can go up to 40-50 MHz)
 
   # GPIO Pin Configuration (BCM numbering)
   spi_dc_pin: 4              # GPIO 4 - Data/Command line (DC/RS)
