@@ -97,7 +97,7 @@ try:
     print('✓ SPI bus 0.0 opened successfully')
     print(f'  Max speed: {spi.max_speed_hz} Hz ({spi.max_speed_hz/1e6:.1f} MHz)')
     print(f'  Mode: {spi.mode}')
-    print(f'  LSB First: {spi.lsb_first}')
+    print(f'  LSB First: {spi.lsbfirst}')
     print(f'  Bits Per Word: {spi.bits_per_word}')
     spi.close()
 except FileNotFoundError:

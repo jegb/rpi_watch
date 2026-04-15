@@ -135,7 +135,7 @@ class GC9A01_SPI:
             self.spi.max_speed_hz = self.spi_speed
             self.spi.mode = 0  # SPI mode 0 (CPOL=0, CPHA=0)
             self.spi.bits_per_word = 8
-            self.spi.lsb_first = False
+            self.spi.lsbfirst = False  # LSB first = False (MSB first)
 
             logger.info(
                 f"Connected to SPI bus {self.spi_bus}.{self.spi_device} "
