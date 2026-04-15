@@ -39,52 +39,42 @@ Pin 6 (RST)   → GPIO 25 (Reset)
 Pin 7 (CS)    → GPIO 8 (Chip Select) - optional, can tie to GND
 ```
 
-## Recommended SPI Driver
+## SPI Driver Implementation
 
-### Option 1: Adafruit Library (Easiest)
-Use Adafruit's well-tested CircuitPython/Python libraries:
-- **Library**: `adafruit-circuitpython-gc9a01`
-- **Installation**: `pip install adafruit-circuitpython-gc9a01`
-- **Advantage**: Production-grade, widely used, good documentation
-- **Disadvantage**: May have more overhead than minimal implementation
+### Current Implementation: Custom SPI Driver ✅
+The project uses a **custom SPI driver** (`src/rpi_watch/display/gc9a01_spi.py`) that is:
+- **Based on**: Adafruit_GC9A01A reference implementation (https://github.com/adafruit/Adafruit_GC9A01A)
+- **Implementation**: Pure Python with RPi.GPIO and spidev
+- **Advantages**:
+  - No external dependencies beyond spidev and RPi.GPIO
+  - Direct hardware control for maximum performance
+  - Proven Adafruit initialization sequence
+  - Compatible with both 7PIN and 8PIN variants
+  - No CircuitPython overhead
+- **Requirements**: Only `spidev` and `RPi.GPIO` (no Adafruit package needed)
 
-### Option 2: Waveshare Driver
-If you purchased from Waveshare, they provide Python libraries:
-- **Library**: `waveshare-display` or similar
-- **Installation**: Follow Waveshare's GitHub repository
-- **Advantage**: Optimized for their specific board variant
-- **Disadvantage**: May be specific to their version
+### Why Custom Implementation?
 
-### Option 3: Custom SPI Driver (Current Implementation - NEEDS UPDATE)
-The current `gc9a01_i2c.py` is built for I2C, which is NOT your hardware. A custom SPI driver would need:
-- **Library**: `RPi.GPIO` or `gpiozero` for GPIO control
-- **SPI Library**: `spidev` for hardware SPI communication
-- **Complexity**: High, requires detailed register manipulation
+1. **Availability**: `adafruit-circuitpython-gc9a01` is not available on Raspberry Pi ARM
+2. **Performance**: Direct SPI control via `spidev` is faster
+3. **Simplicity**: Minimal dependencies (only `spidev` + `RPi.GPIO`)
+4. **Proven**: Implementation follows Adafruit's tested initialization sequence
 
-## Important: Update Required
+### Initialization Sequence
 
-The current project implementation in `src/rpi_watch/display/gc9a01_i2c.py` is designed for an **I2C variant** that you don't have.
+The custom driver includes the complete Adafruit GC9A01 initialization sequence:
+1. Hardware reset
+2. Software reset
+3. Sleep mode exit
+4. Pixel format configuration (RGB565)
+5. Memory access control
+6. Power control (VRH, BT, voltage follower)
+7. Gamma curve calibration
+8. Display mode configuration
+9. Display enable
+10. Brightness control
 
-### Recommended Action
-
-**Switch to Adafruit Library** (easiest path):
-
-1. Update `requirements.txt`:
-   ```
-   Pillow>=10.0.0
-   paho-mqtt>=2.1.0
-   adafruit-circuitpython-gc9a01>=1.4.3
-   PyYAML>=6.0
-   ```
-
-2. Create new `src/rpi_watch/display/gc9a01_spi.py` that wraps Adafruit's driver
-3. Update `src/rpi_watch/main.py` to use the SPI driver instead of I2C
-
-### Alternative: Use Existing Projects
-
-If you want to avoid rewriting, consider using:
-- **Adafruit GC9A01 Examples**: https://github.com/adafruit/Adafruit_CircuitPython_GC9A01
-- **Waveshare Examples**: https://github.com/waveshare/LCD_1.28_GC9A01
+See `SPI_DRIVER_IMPLEMENTATION.md` for detailed step-by-step breakdown.
 
 ## Wiring Diagram
 
