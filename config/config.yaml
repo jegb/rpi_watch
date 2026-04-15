@@ -7,7 +7,7 @@ display:
   # GPIO Pin Configuration (BCM numbering)
   spi_dc_pin: 4              # GPIO 4 - Data/Command line (DC/RS)
   spi_reset_pin: 2           # GPIO 2 - Reset line (RES)
-  spi_cs_pin: 5              # GPIO 5 - Chip Select (CS)
+  spi_cs_pin: null           # CS is tied to GND (always selected) - not a GPIO pin
 
   # Display Settings
   width: 240
