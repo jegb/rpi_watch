@@ -374,6 +374,21 @@ Pin 8: BLK        ──→  3.3V (constant) or GPIO PWM
 
 ## Testing
 
+### Quick Hardware Verification
+
+Run this anytime to verify the system is working:
+
+```bash
+./verify_hardware.sh
+```
+
+This checks:
+- ✓ Configuration loading
+- ✓ SPI bus connectivity
+- ✓ GPIO pin control
+- ✓ Display components
+- ✓ MQTT broker connection
+
 ### Step 1: Run SPI Communication Tests
 
 ```bash
