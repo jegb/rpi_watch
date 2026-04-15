@@ -90,19 +90,21 @@ def test_text_rendering():
     logger.info("TEST 1: Text Rendering")
     logger.info("=" * 70)
 
+    from rpi_watch.display.components import TextSize
+
     renderer = TextRenderer()
 
     tests = [
-        ("42.5", "Large metric"),
-        ("PM2.5", "Label text"),
-        ("µg/m³", "Unit text"),
+        ("42.5", TextSize.XL, "Large metric"),
+        ("PM2.5", TextSize.LARGE, "Label text"),
+        ("µg/m³", TextSize.NORMAL, "Unit text"),
     ]
 
-    for value, title in tests:
+    for text, size, title in tests:
         img = renderer.render_text(
-            value, size="XL", color=(255, 255, 255), bg_color=(0, 0, 0)
+            text, size=size, color=(255, 255, 255), background=(0, 0, 0)
         )
-        show_image(img, f"Text: {title} ('{value}')")
+        show_image(img, f"Text: {title} ('{text}')")
 
     logger.info("✓ Text rendering tests passed\n")
 
@@ -192,7 +194,7 @@ def test_circular_gauge():
             min_value=0,
             max_value=100,
             title=title,
-            title_color=(255, 255, 255),
+            title_color=(200, 200, 200),
         )
         show_image(img, f"Gauge: {title}")
 
@@ -215,8 +217,9 @@ def test_progress_indicators():
     ]
 
     for value, title in tests:
+        # Render simple progress bar
         img = progress.render_linear_progress(
-            value=value, max_value=100, title=title, show_percentage=True
+            value=value, max_value=100, color=(100, 200, 100)
         )
         show_image(img, f"Progress: {title}")
 
