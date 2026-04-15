@@ -18,13 +18,13 @@
 ### SPI Pin Configuration (8PIN variant - Current Hardware)
 ```
 Pin 1 (GND)   → Ground
-Pin 2 (VCC)   → 3.3V or 5V
-Pin 3 (CLK)   → GPIO 11 (SCLK/Clock)
-Pin 4 (MOSI)  → GPIO 10 (MOSI/Data)
-Pin 5 (RES)   → GPIO 25 (Reset)
-Pin 6 (DC)    → GPIO 24 (Data/Command)
-Pin 7 (CS)    → GPIO 8 (Chip Select) - optional, can tie to GND
-Pin 8 (BLK)   → Backlight control (PWM optional, or tie to 3.3V for full brightness)
+Pin 2 (VCC)   → 5V (recommended) or 3.3V
+Pin 3 (CLK)   → GPIO 12 (SCLK/Clock) - or GPIO 11 if using SPI0
+Pin 4 (MOSI)  → GPIO 11 (MOSI/Data) - or GPIO 10 if using SPI0
+Pin 5 (RES)   → GPIO 2 (Reset)
+Pin 6 (DC)    → GPIO 4 (Data/Command)
+Pin 7 (CS)    → GPIO 5 (Chip Select) - optional, can tie to GND
+Pin 8 (BLK)   → 5V or 3.3V (Backlight/LED control - tie high for full brightness)
 ```
 
 ### SPI Pin Configuration (7PIN variant - Legacy)
@@ -81,20 +81,20 @@ See `SPI_DRIVER_IMPLEMENTATION.md` for detailed step-by-step breakdown.
 ```
 Raspberry Pi                    GC9A01 Display (SPI)
 ─────────────                  ──────────────────────
-GPIO 2 (SDA)    ────────────   (Not used for SPI)
-GPIO 3 (SCL)    ────────────   (Not used for SPI)
-
-GPIO 11 (SCLK)  ────────────   CLK (Pin 3)
-GPIO 10 (MOSI)  ────────────   MOSI (Pin 4)
+GPIO 12 (CLK)   ────────────   CLK (Pin 3)
+GPIO 11 (MOSI)  ────────────   MOSI (Pin 4)
 GPIO 9 (MISO)   ────────────   (Not typically used)
 
-GPIO 24 (any)   ────────────   DC (Pin 5) - Data/Command
-GPIO 25 (any)   ────────────   RST (Pin 6) - Reset
-GPIO 8 (any)    ────────────   CS (Pin 7) - Chip Select (optional)
+GPIO 4 (any)    ────────────   DC (Pin 6) - Data/Command
+GPIO 2 (any)    ────────────   RES (Pin 5) - Reset
+GPIO 5 (any)    ────────────   CS (Pin 7) - Chip Select (optional)
 
-3.3V            ────────────   VCC (Pin 2)
+5V (VIN)        ────────────   VCC (Pin 2)
 GND             ────────────   GND (Pin 1)
+5V or 3.3V      ────────────   BLK (Pin 8) - Backlight/LED
 ```
+
+**Note**: If you're using SPI0 instead of SPI1, use GPIO 11 (CLK) and GPIO 10 (MOSI).
 
 ## Performance Characteristics (SPI)
 
@@ -114,15 +114,16 @@ GND             ────────────   GND (Pin 1)
 1. **Display pins** - Update `config/config.yaml`:
    ```yaml
    display:
-     spi_clock_pin: 11      # GPIO 11 (SCLK)
-     spi_mosi_pin: 10       # GPIO 10 (MOSI)
-     spi_dc_pin: 24         # GPIO 24 (Data/Command)
-     spi_reset_pin: 25      # GPIO 25 (Reset)
-     spi_cs_pin: 8          # GPIO 8 (Chip Select, optional)
-     spi_bus: 0             # SPI bus number (0 for /dev/spidev0.0)
+     spi_bus: 0             # SPI bus number (0 for /dev/spidev0.0, 1 for /dev/spidev1.0)
      spi_device: 0          # SPI device number
      spi_speed: 10000000    # Clock speed: 10 MHz
+     spi_dc_pin: 4          # GPIO 4 (Data/Command)
+     spi_reset_pin: 2       # GPIO 2 (Reset)
+     spi_cs_pin: 5          # GPIO 5 (Chip Select, optional)
    ```
+   **Note**: Hardware SPI pins (CLK/MOSI) are automatically handled by the kernel.
+   - If using SPI1 (GPIO 12/11): Update `spi_bus: 1`
+   - If using SPI0 (GPIO 11/10): Keep `spi_bus: 0`
 
 2. **Driver selection** - Choose between:
    - Adafruit library (recommended)
@@ -145,16 +146,18 @@ ls -la /dev/spidev*
 # Test with Python
 python3 -c "import spidev; spi = spidev.SpiDev(); spi.open(0, 0); print('SPI OK')"
 
-# Test GPIO pins
-python3 -c "import RPi.GPIO as GPIO; GPIO.setmode(GPIO.BCM); GPIO.setup(24, GPIO.OUT); print('GPIO OK')"
+# Test GPIO pins (DC, RST, CS)
+python3 -c "import RPi.GPIO as GPIO; GPIO.setmode(GPIO.BCM); GPIO.setup([4, 2, 5], GPIO.OUT); print('GPIO OK')"
 ```
 
 ## Power Considerations
 
-- **Current Draw**: 100-200 mA typical (display at full brightness)
-- **Power Supply**: 5V 1A minimum recommended (3.3V via LDO regulator)
-- **Voltage Levels**: RPi outputs 3.3V; display can accept 5V input (verify with datashee)
-- **Level Shifting**: May need 3.3V↔5V converter if running from 5V supply
+- **Vcc (Display Power)**: **5V recommended** (datasheet supports 3.3V–5.5V, 5V is more reliable)
+- **BLK (Backlight)**: 5V or 3.3V (tie to positive rail for full brightness, or use PWM for variable brightness)
+- **Current Draw**: 100-200 mA typical (display + backlight at full brightness)
+- **Power Supply**: 5V 2A minimum recommended
+- **Voltage Levels**: RPi outputs 3.3V; display accepts 3.3V–5.5V input
+- **Level Shifting**: Not typically needed for this display variant (tolerates 3.3V GPIO signals)
 
 ## Additional Resources
 
