@@ -191,6 +191,7 @@ class GC9A01_SPI:
         """Write data bytes to the display.
 
         Sets DC pin high, sends data via SPI.
+        For large payloads, chunks data into smaller transfers.
 
         Args:
             data: Data bytes to send
@@ -200,8 +201,30 @@ class GC9A01_SPI:
 
         try:
             GPIO.output(self.dc_pin, GPIO.HIGH)  # DC high = data mode
-            self.spi.writebytes(list(data))
-            logger.debug(f"Data sent: {len(data)} bytes")
+
+            # Chunk large transfers to avoid SPI buffer issues
+            # Most SPI implementations have a ~4KB buffer limit
+            CHUNK_SIZE = 4096  # 4KB chunks
+
+            if len(data) <= CHUNK_SIZE:
+                # Small transfer - send directly
+                self.spi.writebytes(list(data))
+                logger.debug(f"Data sent: {len(data)} bytes")
+            else:
+                # Large transfer - send in chunks
+                chunks = len(data) // CHUNK_SIZE
+                remainder = len(data) % CHUNK_SIZE
+
+                for i in range(chunks):
+                    start = i * CHUNK_SIZE
+                    end = start + CHUNK_SIZE
+                    self.spi.writebytes(list(data[start:end]))
+
+                if remainder > 0:
+                    self.spi.writebytes(list(data[-remainder:]))
+
+                logger.debug(f"Data sent: {len(data)} bytes ({chunks} chunks + {remainder} bytes remainder)")
+
         except Exception as e:
             logger.error(f"Failed to write data: {e}")
             raise
