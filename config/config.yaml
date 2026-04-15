@@ -1,0 +1,28 @@
+display:
+  i2c_address: 0x3C          # Detected from i2cdetect - change if needed (0x3D also common)
+  i2c_bus: 1                 # RPi I2C bus number (always 1 for Pi 3/4/5)
+  width: 240
+  height: 240
+  rotation: 0                # 0, 90, 180, 270 degrees
+  refresh_rate_hz: 2         # Updates per second (display refresh frequency)
+
+mqtt:
+  broker_host: "192.168.0.214"   # SPS Monitor MQTT broker
+  broker_port: 1883
+  topic: "airquality/sensor"     # SPS Monitor topic (publishes JSON with pm_2_5, temp, humidity, pm_1_0, pm_4_0, pm_10_0)
+  qos: 1                         # Quality of service level (0=at most once, 1=at least once, 2=exactly once)
+  keepalive: 60                  # Seconds between MQTT keepalive pings
+  json_field: "pm_2_5"           # Extract this field from JSON payload (e.g., "pm_2_5", "temp", "humidity")
+                                 # If omitted, uses first numeric value found
+
+metric_display:
+  decimal_places: 1
+  font_size: 80              # Adjust for number visibility (40-100 range typical)
+  font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+  unit_label: "µm"           # PM2.5 in µg/m³ (or change to "°C" for temperature, "%" for humidity)
+  text_color: [255, 255, 255]    # RGB white
+  background_color: [0, 0, 0]    # RGB black
+
+logging:
+  level: "INFO"              # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

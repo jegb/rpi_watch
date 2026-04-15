@@ -1,0 +1,13 @@
+Pillow>=10.0.0
+paho-mqtt>=2.1.0
+PyYAML>=6.0
+# SPI Display Driver - Choose one:
+# Option 1: Adafruit Library (recommended)
+adafruit-circuitpython-gc9a01>=1.4.3
+# Option 2: Waveshare Library (if using Waveshare board)
+# waveshare-display
+# SPI Communication
+spidev>=3.5
+# GPIO Control
+RPi.GPIO>=0.7.0
+

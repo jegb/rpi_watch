@@ -1,0 +1,89 @@
+# Configuration examples for displaying SPS Monitor metrics
+# The main config.yaml is set up for PM2.5 display
+# Use these examples to switch to other metrics
+
+# Example 1: Display PM2.5 (current default config)
+# This shows particulate matter in µg/m³
+# Keep the mqtt section from config.yaml and use this metric_display section
+metric_display_pm25:
+  decimal_places: 1
+  font_size: 80
+  font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+  unit_label: "µm"
+  text_color: [255, 255, 255]
+  background_color: [0, 0, 0]
+
+# Example 2: Display Temperature in °C
+# Edit config.yaml and:
+# 1. Change mqtt.json_field to "temp"
+# 2. Update metric_display.unit_label to "°C"
+metric_display_temperature:
+  decimal_places: 1
+  font_size: 80
+  font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+  unit_label: "°C"
+  text_color: [255, 255, 255]
+  background_color: [0, 0, 0]
+
+# Example 3: Display Humidity as %
+# Edit config.yaml and:
+# 1. Change mqtt.json_field to "humidity"
+# 2. Update metric_display.unit_label to "%"
+metric_display_humidity:
+  decimal_places: 1
+  font_size: 80
+  font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+  unit_label: "%"
+  text_color: [255, 255, 255]
+  background_color: [0, 0, 0]
+
+# Example 4: Display PM1.0
+metric_display_pm10:
+  decimal_places: 1
+  font_size: 80
+  font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+  unit_label: "µm"
+  text_color: [255, 255, 255]
+  background_color: [0, 0, 0]
+
+# Example 5: Display PM4.0
+metric_display_pm40:
+  decimal_places: 1
+  font_size: 80
+  font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+  unit_label: "µm"
+  text_color: [255, 255, 255]
+  background_color: [0, 0, 0]
+
+# Example 6: Display PM10
+metric_display_pm100:
+  decimal_places: 1
+  font_size: 80
+  font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+  unit_label: "µm"
+  text_color: [255, 255, 255]
+  background_color: [0, 0, 0]
+
+# SPS Monitor JSON payload format:
+# {
+#   "pm_1_0": <PM1.0 value>,
+#   "pm_2_5": <PM2.5 value>,
+#   "pm_4_0": <PM4.0 value>,
+#   "pm_10_0": <PM10 value>,
+#   "temp": <Temperature in °C>,
+#   "humidity": <Humidity in %>
+# }
+#
+# Available json_field values for mqtt section:
+# - "pm_1_0" : Particulate matter 1.0 µm
+# - "pm_2_5" : Particulate matter 2.5 µm (PM2.5, common air quality metric)
+# - "pm_4_0" : Particulate matter 4.0 µm
+# - "pm_10_0" : Particulate matter 10 µm
+# - "temp" : Temperature
+# - "humidity" : Relative humidity
+#
+# To display a different metric:
+# 1. Edit config/config.yaml
+# 2. Change mqtt.json_field to desired field name
+# 3. Update metric_display.unit_label to appropriate unit
+# 4. Optionally adjust font_size for better visibility
