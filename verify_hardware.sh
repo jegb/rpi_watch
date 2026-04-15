@@ -187,6 +187,10 @@ EOF
 import paho.mqtt.client as mqtt
 import time
 import yaml
+import warnings
+
+# Suppress paho deprecation warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 try:
     with open('config/config.yaml') as f:
@@ -195,14 +199,19 @@ try:
     broker_host = config['mqtt']['broker_host']
     broker_port = config['mqtt']['broker_port']
 
-    def on_connect(client, userdata, flags, rc):
+    def on_connect(client, userdata, flags, rc, properties=None):
         if rc == 0:
             print(f'✓ Connected to MQTT broker: {broker_host}:{broker_port}')
         else:
             print(f'✗ Failed to connect, code {rc}')
             exit(1)
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+    try:
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    except AttributeError:
+        # Fallback to VERSION1 for older paho-mqtt versions
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+
     client.on_connect = on_connect
     client.connect(broker_host, broker_port, 60)
     client.loop_start()
@@ -210,14 +219,17 @@ try:
     client.loop_stop()
 
 except ConnectionRefusedError:
-    print(f'✗ MQTT broker not accessible at {broker_host}:{broker_port}')
-    print('  Start MQTT broker or update config.yaml')
+    print(f'! MQTT broker not accessible at {broker_host}:{broker_port}')
+    print('  (Optional - not required for display testing)')
+except TimeoutError:
+    print(f'! MQTT broker timeout at {broker_host}:{broker_port}')
+    print('  (Optional - not required for display testing)')
 except Exception as e:
-    print(f'! MQTT warning: {e}')
+    print(f'! MQTT check: {e}')
     print('  (This is OK if you plan to test without MQTT)')
 EOF
     # Don't exit on MQTT failure - it's optional for offline testing
-    warn "MQTT check completed (optional for offline testing)"
+    warn "MQTT check completed (optional for display testing)"
 
     # Final summary
     section "VERIFICATION SUMMARY"

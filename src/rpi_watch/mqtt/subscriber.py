@@ -7,7 +7,11 @@ import json
 import logging
 import threading
 import time
+import warnings
 from typing import Callable, Optional
+
+# Suppress paho-mqtt deprecation warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 try:
     import paho.mqtt.client as mqtt
@@ -57,6 +61,7 @@ class MQTTSubscriber:
         self.metric_store = metric_store
         self.json_field = json_field
 
+        # Use VERSION1 API (warnings filtered globally above)
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
