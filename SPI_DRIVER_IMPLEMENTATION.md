@@ -1,8 +1,9 @@
 # SPI Driver Implementation - Step-by-Step Guide
 
-**Status**: SPI Driver Fully Implemented ✅
-**Hardware**: GC9A01 1.28" Round Display (SPI Variant - 7PIN/8PIN)
+**Status**: SPI Driver Fully Implemented with Adafruit Sequence ✅
+**Hardware**: GC9A01 1.28" Round Display (SPI Variant - 8PIN)
 **Date**: April 15, 2026
+**Reference**: Based on Adafruit_GC9A01A (https://github.com/adafruit/Adafruit_GC9A01A)
 
 ## What Has Been Implemented
 
@@ -78,23 +79,75 @@ Each test provides detailed feedback on success/failure.
 - Combined layout blending
 - Color variations (7 color schemes)
 
-## PIN CONFIGURATION (Raspberry Pi GPIO - BCM Numbering)
+## PIN CONFIGURATION (8PIN Variant - Current Hardware)
 
 ```
-GC9A01 Display (SPI)          Raspberry Pi GPIO
-─────────────────────────────────────────────────
+GC9A01 Display (8PIN)         Raspberry Pi GPIO
+──────────────────────────────────────────────────
 
-Pin 1: GND        ───────────  GND (Pin 6, 9, 14, 20, 25, etc.)
+Pin 1: GND        ───────────  GND (Pin 6, 9, 14, 20, 25, 30, 34, 39)
 Pin 2: VCC        ───────────  3.3V (Pin 1 or 17)
-Pin 3: CLK (SCLK) ───────────  GPIO 11 (SCLK) - Hardware SPI
-Pin 4: MOSI       ───────────  GPIO 10 (MOSI) - Hardware SPI
-Pin 5: DC         ───────────  GPIO 24 (any GPIO pin)
-Pin 6: RST        ───────────  GPIO 25 (any GPIO pin)
-Pin 7: CS         ───────────  GPIO 8 (any GPIO pin, or tie to GND)
+Pin 3: CLK        ───────────  GPIO 11 (SCLK) - Hardware SPI Clock
+Pin 4: MOSI       ───────────  GPIO 10 (MOSI) - Hardware SPI Data
+Pin 5: RES        ───────────  GPIO 25 (Reset)
+Pin 6: DC         ───────────  GPIO 24 (Data/Command)
+Pin 7: CS         ───────────  GPIO 8 (Chip Select, optional - can tie to GND)
+Pin 8: BLK        ───────────  3.3V (Backlight - tie to 3.3V for full brightness)
 
-Note: Pins 3 & 4 must use hardware SPI pins (GPIO 11 & 10 on RPi 3/4/5)
-      Pins 5, 6, 7 can use any GPIO pins (configured in config.yaml)
+Critical Notes:
+- Pin 3 (CLK) & Pin 4 (MOSI) MUST use hardware SPI (GPIO 11 & 10 on RPi)
+- Pin 5 (RES) & Pin 6 (DC) can use any GPIO pins (set in config.yaml)
+- Pin 7 (CS) is optional - can be tied to GND if not used
+- Pin 8 (BLK) can be PWM for brightness control, or tie to 3.3V
 ```
+
+### Legacy 7PIN Variant (if applicable)
+```
+If you have an older 7-pin display:
+Pin 1: GND        ───────────  GND
+Pin 2: VCC        ───────────  3.3V
+Pin 3: CLK        ───────────  GPIO 11 (SCLK)
+Pin 4: MOSI       ───────────  GPIO 10 (MOSI)
+Pin 5: DC         ───────────  GPIO 24 (Data/Command)
+Pin 6: RST        ───────────  GPIO 25 (Reset)
+Pin 7: CS         ───────────  GPIO 8 (Chip Select, optional)
+```
+
+## Display Initialization Sequence (Adafruit-Based)
+
+The enhanced initialization sequence in `gc9a01_spi.py` follows Adafruit's proven GC9A01 approach:
+
+### Step-by-Step Initialization
+
+1. **Hardware Reset** - Reset pulse (high → low → high)
+2. **Software Reset** - Clear internal state
+3. **Exit Sleep Mode** - Wake up the display
+4. **Set Pixel Format** - Configure RGB565 16-bit color mode
+5. **Memory Access Control** - Set rotation/mirror settings
+6. **Power Control** - Configure voltage regulators:
+   - VRH (voltage regulator) = 0x14
+   - BT (AVDD/GVDD) = 0xA2
+   - Voltage follower = 0x02
+7. **Gamma Curves** - Apply calibration curves for color accuracy:
+   - Positive gamma (16 values)
+   - Negative gamma (16 values)
+8. **Normal Display Mode** - Set to normal operation
+9. **Display ON** - Enable display output
+10. **Brightness** - Set to maximum (0xFF)
+
+### Timing Requirements
+
+- Reset pulse: 50ms low, 150ms high
+- Sleep out → Display on: 120ms each
+- Total initialization: ~600ms
+
+### Why This Sequence Works
+
+The Adafruit sequence includes critical power control and gamma calibration steps that basic initialization sequences miss. This ensures:
+- Proper voltage regulation for stable display
+- Accurate color reproduction
+- Reliable operation across different GC9A01 variants
+- Compatibility with both 7PIN and 8PIN displays
 
 ## Configuration Files
 

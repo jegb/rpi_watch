@@ -15,8 +15,21 @@
 - **Power**: 3.3V typical (5V tolerant with level shifter)
 - **Data Format**: 16-bit RGB565 (5-bit R, 6-bit G, 5-bit B)
 
-### SPI Pin Configuration (7PIN variant)
+### SPI Pin Configuration (8PIN variant - Current Hardware)
 ```
+Pin 1 (GND)   → Ground
+Pin 2 (VCC)   → 3.3V or 5V
+Pin 3 (CLK)   → GPIO 11 (SCLK/Clock)
+Pin 4 (MOSI)  → GPIO 10 (MOSI/Data)
+Pin 5 (RES)   → GPIO 25 (Reset)
+Pin 6 (DC)    → GPIO 24 (Data/Command)
+Pin 7 (CS)    → GPIO 8 (Chip Select) - optional, can tie to GND
+Pin 8 (BLK)   → Backlight control (PWM optional, or tie to 3.3V for full brightness)
+```
+
+### SPI Pin Configuration (7PIN variant - Legacy)
+```
+If you have a 7-pin variant:
 Pin 1 (GND)   → Ground
 Pin 2 (VCC)   → 3.3V or 5V
 Pin 3 (CLK)   → GPIO 11 (SCLK/Clock)
@@ -24,11 +37,6 @@ Pin 4 (MOSI)  → GPIO 10 (MOSI/Data)
 Pin 5 (DC)    → GPIO 24 (Data/Command)
 Pin 6 (RST)   → GPIO 25 (Reset)
 Pin 7 (CS)    → GPIO 8 (Chip Select) - optional, can tie to GND
-```
-
-### SPI Pin Configuration (8PIN variant)
-```
-Adds Pin 8: GND (additional ground, same as Pin 1)
 ```
 
 ## Recommended SPI Driver

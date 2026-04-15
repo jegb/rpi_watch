@@ -111,12 +111,14 @@ sudo apt-get install -y \
   python3-pip \
   i2c-tools \
   libjpeg-dev \
+  git
+
+# Optional: Pillow dependencies (may fail on newer OS - skip if not needed)
+sudo apt-get install -y \
   libharfbuzz0b \
   libwebp6 \
   libtiff5 \
-  libopenjp2-7 \
-  libjasper1 \
-  git
+  libopenjp2-7 || echo "Note: Some optional packages failed - this is OK"
 
 # Verify Python version (should be 3.9+)
 python3 --version
@@ -154,12 +156,14 @@ cd ~
 mkdir -p ~/workspace/rpi_watch
 cd ~/workspace/rpi_watch
 
-# If cloning from Git (optional):
-# git clone <repository-url> .
+# If cloning from Git:
+# git clone https://github.com/jegb/rpi_watch.git .
 # Or copy files to this directory
 ```
 
-### Step 2: Create Python Virtual Environment
+### Step 2: Create Python Virtual Environment (FIRST!)
+
+⚠️ **IMPORTANT**: Create the virtual environment BEFORE installing any packages
 
 ```bash
 # Create virtual environment
@@ -168,22 +172,40 @@ python3 -m venv venv
 # Activate virtual environment
 source venv/bin/activate
 
-# Verify activation (prompt should show (venv))
+# Verify activation (prompt should show (venv) prefix)
 which python
-# Should output: /home/pi/venv/bin/python3
+# Should output: /home/pi/workspace/rpi_watch/venv/bin/python3
+
+# You MUST activate this environment before installing any packages
 ```
 
 ### Step 3: Install Python Dependencies
 
 ```bash
-# Upgrade pip, setuptools, wheel
+# Now that venv is activated, upgrade pip
 pip install --upgrade pip setuptools wheel
 
 # Install project requirements
 pip install -r requirements.txt
 
-# Verify installations
+# Verify key installations
 pip list | grep -E "Pillow|paho|spidev|RPi"
+```
+
+**Expected output:**
+```
+Pillow             10.0.0 (or later)
+paho-mqtt          2.1.0 (or later)
+RPi.GPIO           0.7.0 (or later)
+spidev             3.5 (or later)
+PyYAML             6.0 (or later)
+```
+
+### Step 4: Install Project (Optional)
+
+```bash
+# Make sure venv is still activated
+pip install -e .
 ```
 
 **Expected output:**
@@ -323,20 +345,24 @@ print('✓ All GPIO pins working')
 
 ### Step 3: Physical Wiring
 
-Connect your GC9A01 display to Raspberry Pi:
+Connect your GC9A01 display to Raspberry Pi (8PIN variant):
 
 ```
-GC9A01 (7PIN)          Raspberry Pi GPIO
+GC9A01 (8PIN)          Raspberry Pi GPIO
 ─────────────────────────────────────────
-Pin 1: GND        ──→  GND (Pin 6, 9, etc.)
+Pin 1: GND        ──→  GND (Pin 6, 9, 14, 20, 25, 30, 34, 39)
 Pin 2: VCC        ──→  3.3V (Pin 1 or 17)
-Pin 3: SCLK       ──→  GPIO 11 (SPI Clock)
-Pin 4: MOSI       ──→  GPIO 10 (SPI Data)
-Pin 5: DC         ──→  GPIO 24 (any GPIO)
-Pin 6: RST        ──→  GPIO 25 (any GPIO)
-Pin 7: CS         ──→  GPIO 8 (optional)
+Pin 3: CLK        ──→  GPIO 11 (SPI Clock - Pin 23)
+Pin 4: MOSI       ──→  GPIO 10 (SPI Data - Pin 19)
+Pin 5: RES        ──→  GPIO 25 (Reset)
+Pin 6: DC         ──→  GPIO 24 (Data/Command)
+Pin 7: CS         ──→  GPIO 8 (Chip Select, optional)
                        or GND if not used
+Pin 8: BLK        ──→  3.3V (constant) or GPIO PWM
+                       (backlight - tie to 3.3V for full brightness)
 ```
+
+**Important**: Pin order is critical. Double-check against your display before powering on.
 
 **Wiring Best Practices:**
 - Use short wires (< 30cm) for SPI
@@ -781,12 +807,19 @@ Logs:               ~/workspace/rpi_watch/logs/
 ### Default Pin Configuration
 
 ```
+GPIO 11: Clock (CLK) - hardware SPI
+GPIO 10: MOSI (data) - hardware SPI
+GPIO 25: Reset (RES)
 GPIO 24: Data/Command (DC)
-GPIO 25: Reset (RST)
-GPIO 8:  Chip Select (CS) - optional
-GPIO 11: SCLK (hardware SPI)
-GPIO 10: MOSI (hardware SPI)
+GPIO 8:  Chip Select (CS) - optional, can tie to GND
 ```
+
+**These match the 8PIN display variant:**
+- Pin 3 (CLK) → GPIO 11
+- Pin 4 (MOSI) → GPIO 10
+- Pin 5 (RES) → GPIO 25
+- Pin 6 (DC) → GPIO 24
+- Pin 7 (CS) → GPIO 8
 
 ---
 

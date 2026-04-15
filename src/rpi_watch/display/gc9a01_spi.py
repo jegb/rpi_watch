@@ -3,7 +3,9 @@
 This module provides SPI communication with the GC9A01 display controller.
 Handles initialization, register writes, and pixel data transmission via SPI.
 
-Hardware: GC9A01 1.28" Round Display - SPI Variant
+Based on Adafruit_GC9A01A implementation with enhancements for Raspberry Pi.
+Hardware: GC9A01 1.28" Round Display - SPI Variant (8PIN)
+Reference: https://github.com/adafruit/Adafruit_GC9A01A
 """
 
 import logging
@@ -25,29 +27,39 @@ logger = logging.getLogger(__name__)
 
 
 class GC9A01_SPI:
-    """SPI driver for GC9A01 240x240 circular display.
+    """SPI driver for GC9A01 240x240 circular display (8PIN variant).
 
     Communicates via SPI protocol (hardware SPI on Raspberry Pi)
     to control display initialization, pixel data writes.
+
+    Based on Adafruit's proven GC9A01 initialization sequence.
     """
 
-    # GC9A01 Commands
-    CMD_RESET = 0x01             # Software reset
-    CMD_SLEEP_OUT = 0x11         # Exit sleep mode
-    CMD_PARTIAL_ON = 0x12        # Partial display mode ON
-    CMD_NORMAL_ON = 0x13         # Normal display mode ON
-    CMD_DISPLAY_INVERT_ON = 0x20 # Display invert ON
-    CMD_DISPLAY_INVERT_OFF = 0x21 # Display invert OFF
-    CMD_DISPLAY_OFF = 0x28       # Display OFF
-    CMD_DISPLAY_ON = 0x29        # Display ON
-    CMD_COLUMN_ADDR = 0x2A       # Set column address window
-    CMD_ROW_ADDR = 0x2B          # Set row address window
-    CMD_WRITE_RAM = 0x2C         # Write to memory (RAM)
-    CMD_SET_PIXEL_FORMAT = 0x3A  # Pixel format setting
-    CMD_BRIGHTNESS = 0x51        # Write brightness control
-    CMD_BRIGHTNESS_DISPLAY = 0x55 # Brightness control display
-    CMD_GAMMA_SET = 0x26         # Gamma curve selection
-    CMD_MEMORY_ACCESS = 0x36     # Memory access control (rotation)
+    # GC9A01 Standard Commands (from datasheet)
+    CMD_RESET = 0x01                # Software reset
+    CMD_SLEEP_OUT = 0x11            # Exit sleep mode
+    CMD_PARTIAL_ON = 0x12           # Partial display mode ON
+    CMD_NORMAL_ON = 0x13            # Normal display mode ON
+    CMD_DISPLAY_INVERT_ON = 0x20    # Display invert ON
+    CMD_DISPLAY_INVERT_OFF = 0x21   # Display invert OFF
+    CMD_DISPLAY_OFF = 0x28          # Display OFF
+    CMD_DISPLAY_ON = 0x29           # Display ON
+    CMD_COLUMN_ADDR = 0x2A          # Set column address window
+    CMD_ROW_ADDR = 0x2B             # Set row address window
+    CMD_WRITE_RAM = 0x2C            # Write to memory (RAM)
+    CMD_SET_PIXEL_FORMAT = 0x3A     # Pixel format setting
+    CMD_BRIGHTNESS = 0x51           # Write brightness control
+    CMD_BRIGHTNESS_DISPLAY = 0x55   # Brightness control display
+    CMD_GAMMA_SET = 0x26            # Gamma curve selection
+    CMD_MEMORY_ACCESS = 0x36        # Memory access control (rotation)
+
+    # GC9A01 Extended Commands (power control)
+    CMD_POWER_CONTROL_1 = 0xC3      # Power control 1
+    CMD_POWER_CONTROL_2 = 0xC4      # Power control 2
+    CMD_POWER_CONTROL_3 = 0xC9      # Power control 3
+    CMD_POSITIVE_GAMMA = 0xF0       # Positive gamma curve
+    CMD_NEGATIVE_GAMMA = 0xF1       # Negative gamma curve
+    CMD_INTERFACE_PIXEL_FORMAT = 0x3A # Interface pixel format
 
     def __init__(
         self,
@@ -221,48 +233,94 @@ class GC9A01_SPI:
             raise
 
     def init_display(self):
-        """Initialize the display with power-on sequence and configuration.
+        """Initialize the display with enhanced power-on sequence.
 
-        Sets up the display in 16-bit RGB565 mode and enables output.
+        Sets up the display in 16-bit RGB565 mode with proper power control
+        and gamma calibration (based on Adafruit GC9A01 reference).
         """
-        logger.info("Initializing GC9A01 display...")
+        logger.info("Initializing GC9A01 display (Adafruit sequence)...")
 
         try:
-            # Hardware reset
+            # ===== Hardware Reset =====
+            logger.debug("Step 1: Hardware reset")
             self.reset()
+            time.sleep(0.05)
 
-            # Software reset
+            # ===== Software Reset =====
+            logger.debug("Step 2: Software reset")
             self._write_command(self.CMD_RESET)
-            time.sleep(0.10)
+            time.sleep(0.120)
 
-            # Sleep out (wake up)
+            # ===== Sleep Mode Off (Wake Up) =====
+            logger.debug("Step 3: Exit sleep mode")
             self._write_command(self.CMD_SLEEP_OUT)
+            time.sleep(0.120)
+
+            # ===== Pixel Format Configuration =====
+            logger.debug("Step 4: Set pixel format to RGB565")
+            self._write_command_data(self.CMD_INTERFACE_PIXEL_FORMAT, bytes([0x55]))  # 0x55 = RGB565, 16-bit
             time.sleep(0.10)
 
-            # Set pixel format to 16-bit RGB565
-            self._write_command_data(self.CMD_SET_PIXEL_FORMAT, bytes([0x55]))  # 0x55 = RGB565
-            time.sleep(0.01)
-
-            # Set gamma curve
-            self._write_command_data(self.CMD_GAMMA_SET, bytes([0x01]))
-            time.sleep(0.01)
-
-            # Memory access control (rotation and mirror settings)
-            # 0x00 = normal
+            # ===== Memory Access Control (Rotation) =====
+            logger.debug("Step 5: Configure memory access")
+            # 0x00: MY=0, MX=0, MV=0, ML=0, BGR=0 (normal)
+            # For different rotations: 0x00=0°, 0x60=90°, 0xA0=180°, 0xC0=270°
             self._write_command_data(self.CMD_MEMORY_ACCESS, bytes([0x00]))
+            time.sleep(0.01)
 
-            # Turn on display
+            # ===== Power Control Sequence (Adafruit recommended) =====
+            logger.debug("Step 6: Power control configuration")
+            # Power control 1 - VRH[5:0] voltage regulator
+            self._write_command_data(self.CMD_POWER_CONTROL_1, bytes([0x14]))
+            time.sleep(0.01)
+
+            # Power control 2 - BT[2:0] AVDD / GVDD voltage
+            self._write_command_data(self.CMD_POWER_CONTROL_2, bytes([0xA2]))
+            time.sleep(0.01)
+
+            # Power control 3 - Voltage follower
+            self._write_command_data(self.CMD_POWER_CONTROL_3, bytes([0x02]))
+            time.sleep(0.01)
+
+            # ===== Gamma Curve Calibration =====
+            logger.debug("Step 7: Configure gamma curves")
+            # Positive gamma correction
+            positive_gamma = bytes([
+                0x00, 0x04, 0x09, 0x0E, 0x14, 0x28, 0x35, 0x42,
+                0x4F, 0x3D, 0x3C, 0x3A, 0x38, 0x37, 0x36, 0x35
+            ])
+            self._write_command_data(self.CMD_POSITIVE_GAMMA, positive_gamma)
+            time.sleep(0.01)
+
+            # Negative gamma correction
+            negative_gamma = bytes([
+                0x00, 0x05, 0x0A, 0x0F, 0x15, 0x29, 0x36, 0x43,
+                0x50, 0x3E, 0x3D, 0x3B, 0x39, 0x38, 0x37, 0x36
+            ])
+            self._write_command_data(self.CMD_NEGATIVE_GAMMA, negative_gamma)
+            time.sleep(0.01)
+
+            # ===== Display Configuration =====
+            logger.debug("Step 8: Normal display mode")
+            self._write_command(self.CMD_NORMAL_ON)
+            time.sleep(0.01)
+
+            # ===== Display ON =====
+            logger.debug("Step 9: Turn on display")
             self._write_command(self.CMD_DISPLAY_ON)
-            time.sleep(0.12)
+            time.sleep(0.120)
 
-            # Set brightness to maximum
-            self._write_command_data(self.CMD_BRIGHTNESS, bytes([0xFF]))
+            # ===== Brightness Control =====
+            logger.debug("Step 10: Set brightness to maximum")
+            self._write_command_data(self.CMD_BRIGHTNESS, bytes([0xFF]))  # 0xFF = full brightness
+            time.sleep(0.01)
 
             self.initialized = True
-            logger.info("Display initialization complete")
+            logger.info("✓ Display initialization complete (Adafruit sequence)")
 
         except Exception as e:
             logger.error(f"Display initialization failed: {e}")
+            self.initialized = False
             raise
 
     def set_address_window(self, x0: int, y0: int, x1: int, y1: int):
