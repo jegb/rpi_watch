@@ -280,6 +280,11 @@ class GC9A01_SPI:
             # This sequence comes from Adafruit's initialization array
             # Many registers are undocumented, but necessary for proper display function
 
+            # Enable Inter-Register access
+            self._write_command_data(0xFE, bytes([0x00])) # Inter Register Enable 1
+            self._write_command_data(0xEF, bytes([0x00])) # Inter Register Enable 2
+
+
             logger.debug("Sending undocumented register initialization (0x84-0x8F)")
             self._write_command_data(0xEB, bytes([0x14]))
             self._write_command_data(0x84, bytes([0x40]))
@@ -353,10 +358,6 @@ class GC9A01_SPI:
             logger.debug("Turning on display")
             self._write_command(self.CMD_DISPLAY_ON)
             time.sleep(0.150)  # 150ms delay as per Adafruit
-
-            # Enable Inter-Register access
-            self._write_command_data(0xFE, bytes([0x00])) # Inter Register Enable 1
-            self._write_command_data(0xEF, bytes([0x00])) # Inter Register Enable 2
 
             # ===== Brightness Control =====
             logger.debug("Setting brightness to maximum")
