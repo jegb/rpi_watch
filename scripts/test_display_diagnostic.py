@@ -103,46 +103,12 @@ def test_display_initialization():
         )
         display.connect()
 
-        logger.info("Step 1: Hardware reset...")
-        display.reset()
-        time.sleep(0.5)
-
-        logger.info("Step 2: Software reset...")
-        display._write_command(0x01)  # CMD_RESET
-        time.sleep(0.2)
-
-        logger.info("Step 3: Sleep out...")
-        display._write_command(0x11)  # CMD_SLEEP_OUT
-        time.sleep(0.2)
-
-        logger.info("Step 4: Set pixel format (RGB565)...")
-        display._write_command_data(0x3A, bytes([0x55]))
-        time.sleep(0.1)
-
-        logger.info("Step 5: Memory access control...")
-        display._write_command_data(0x36, bytes([0x00]))
-        time.sleep(0.1)
-
-        logger.info("Step 6: Power control...")
-        display._write_command_data(0xC3, bytes([0x14]))  # Power control 1
-        time.sleep(0.1)
-
-        logger.info("Step 7: Display mode (normal)...")
-        display._write_command(0x13)  # CMD_NORMAL_ON
-        time.sleep(0.1)
-
-        logger.info("Step 8: Display ON...")
-        display._write_command(0x29)  # CMD_DISPLAY_ON
-        time.sleep(0.2)
-
-        logger.info("Step 9: Set brightness (max)...")
-        display._write_command_data(0x51, bytes([0xFF]))
-        time.sleep(0.1)
+        logger.info("Step 1: Run GC9A01 SPI init sequence...")
+        display.init_display()
 
         logger.info("✓ Display initialization completed\n")
 
-        # Now test a white frame
-        logger.info("Sending white frame (all pixels on)...")
+        logger.info("Step 2: Sending white frame (all pixels on)...")
         white_frame = bytes([0xFF, 0xFF] * (240 * 240))  # All white in RGB565
         display.set_address_window(0, 0, 239, 239)
         display._write_command(0x2C)  # CMD_WRITE_RAM

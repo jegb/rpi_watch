@@ -40,8 +40,8 @@ class GC9A01_SPI:
     CMD_SLEEP_OUT = 0x11            # Exit sleep mode
     CMD_PARTIAL_ON = 0x12           # Partial display mode ON
     CMD_NORMAL_ON = 0x13            # Normal display mode ON
-    CMD_DISPLAY_INVERT_ON = 0x20    # Display invert ON
-    CMD_DISPLAY_INVERT_OFF = 0x21   # Display invert OFF
+    CMD_DISPLAY_INVERT_OFF = 0x20   # Display invert OFF
+    CMD_DISPLAY_INVERT_ON = 0x21    # Display invert ON
     CMD_DISPLAY_OFF = 0x28          # Display OFF
     CMD_DISPLAY_ON = 0x29           # Display ON
     CMD_COLUMN_ADDR = 0x2A          # Set column address window
@@ -65,6 +65,36 @@ class GC9A01_SPI:
     CMD_INREGEN1 = 0xFE             # Inter register enable 1
     CMD_INREGEN2 = 0xEF             # Inter register enable 2
 
+    DEFAULT_MADCTL = 0x48           # MX | BGR (common round-panel default)
+    RESET_PULSE_HIGH_S = 0.010
+    RESET_PULSE_LOW_S = 0.100
+    RESET_STABILIZE_S = 0.200
+
+    ADAFRUIT_INIT_SEQUENCE = bytes(
+        b"\xFE\x00"                      # Inter Register Enable1
+        b"\xEF\x00"                      # Inter Register Enable2
+        b"\xB6\x02\x00\x00"              # Display Function Control
+        b"\x36\x01\x48"                  # MADCTL (overridden by self.madctl)
+        b"\x3A\x01\x05"                  # RGB565 / 16-bit color
+        b"\xC3\x01\x13"                  # Power Control 2
+        b"\xC4\x01\x13"                  # Power Control 3
+        b"\xC9\x01\x22"                  # Power Control 4
+        b"\xF0\x06\x45\x09\x08\x08\x26\x2A"
+        b"\xF1\x06\x43\x70\x72\x36\x37\x6F"
+        b"\xF2\x06\x45\x09\x08\x08\x26\x2A"
+        b"\xF3\x06\x43\x70\x72\x36\x37\x6F"
+        b"\x66\x0A\x3C\x00\xCD\x67\x45\x45\x10\x00\x00\x00"
+        b"\x67\x0A\x00\x3C\x00\x00\x00\x01\x54\x10\x32\x98"
+        b"\x74\x07\x10\x85\x80\x00\x00\x4E\x00"
+        b"\x98\x02\x3E\x07"
+        b"\x35\x00"                      # Tearing Effect Line ON
+        b"\x21\x00"                      # Display inversion ON
+        b"\x11\x80\x78"                  # Sleep Out + 120ms
+        b"\x29\x80\x14"                  # Display ON + 20ms
+        b"\x2A\x04\x00\x00\x00\xEF"      # Column Address Set (overridden by width)
+        b"\x2B\x04\x00\x00\x00\xEF"      # Row Address Set (overridden by height)
+    )
+
     def __init__(
         self,
         spi_bus: int = 0,
@@ -73,6 +103,7 @@ class GC9A01_SPI:
         dc_pin: int = 24,            # Data/Command
         reset_pin: int = 25,         # Reset
         cs_pin: Optional[int] = 8,   # Chip Select (optional)
+        madctl: int = DEFAULT_MADCTL,
     ):
         """Initialize the GC9A01 SPI driver.
 
@@ -83,6 +114,8 @@ class GC9A01_SPI:
             dc_pin: GPIO pin for Data/Command control (BCM numbering)
             reset_pin: GPIO pin for Reset control (BCM numbering)
             cs_pin: GPIO pin for Chip Select (optional, can be tied to GND)
+            madctl: Memory Access Control register value. Common round-panel
+                values are 0x08, 0x48, and 0x88.
         """
         if spidev is None:
             raise RuntimeError("spidev not installed. Install via: pip install spidev")
@@ -95,6 +128,7 @@ class GC9A01_SPI:
         self.dc_pin = dc_pin
         self.reset_pin = reset_pin
         self.cs_pin = cs_pin
+        self.madctl = self._coerce_byte(madctl, "madctl")
 
         self.width = 240
         self.height = 240
@@ -105,8 +139,28 @@ class GC9A01_SPI:
 
         logger.info(
             f"GC9A01_SPI driver initialized (bus={spi_bus}, device={spi_device}, "
-            f"speed={spi_speed/1e6:.1f}MHz, DC={dc_pin}, RST={reset_pin}, CS={cs_pin})"
+            f"speed={spi_speed/1e6:.1f}MHz, DC={dc_pin}, RST={reset_pin}, "
+            f"CS={cs_pin}, MADCTL=0x{self.madctl:02X})"
         )
+
+    @staticmethod
+    def _coerce_byte(value, field_name: str) -> int:
+        """Normalize a config value into an unsigned 8-bit integer."""
+        if isinstance(value, str):
+            try:
+                value = int(value, 0)
+            except ValueError as exc:
+                raise ValueError(f"{field_name} must be an integer byte value") from exc
+
+        try:
+            value = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} must be an integer byte value") from exc
+
+        if not 0x00 <= value <= 0xFF:
+            raise ValueError(f"{field_name} must be between 0x00 and 0xFF")
+
+        return value
 
     def __enter__(self):
         """Context manager entry."""
@@ -244,6 +298,51 @@ class GC9A01_SPI:
         if data:
             self._write_data(data)
 
+    def _apply_memory_access_control(self):
+        """Apply the currently configured MADCTL value."""
+        self._write_command_data(self.CMD_MEMORY_ACCESS, bytes([self.madctl]))
+
+    def _override_init_data(self, command: int, data: bytes) -> bytes:
+        """Apply local panel overrides to a packed init-sequence command."""
+        if command == self.CMD_MEMORY_ACCESS and len(data) == 1:
+            return bytes([self.madctl])
+
+        if command == self.CMD_COLUMN_ADDR and len(data) == 4:
+            return struct.pack(">HH", 0, self.width - 1)
+
+        if command == self.CMD_ROW_ADDR and len(data) == 4:
+            return struct.pack(">HH", 0, self.height - 1)
+
+        return data
+
+    def _run_init_sequence(self, sequence: bytes):
+        """Execute a BusDisplay-style packed initialization sequence."""
+        index = 0
+
+        while index < len(sequence):
+            command = sequence[index]
+            index += 1
+
+            param_spec = sequence[index]
+            index += 1
+
+            has_delay = bool(param_spec & 0x80)
+            param_count = param_spec & 0x7F
+
+            data = bytes(sequence[index:index + param_count])
+            index += param_count
+            data = self._override_init_data(command, data)
+
+            if data:
+                self._write_command_data(command, data)
+            else:
+                self._write_command(command)
+
+            if has_delay:
+                delay_ms = sequence[index]
+                index += 1
+                time.sleep(0.5 if delay_ms == 0xFF else delay_ms / 1000.0)
+
     def reset(self):
         """Perform a hardware reset of the display controller."""
         if not self.spi:
@@ -253,119 +352,38 @@ class GC9A01_SPI:
             logger.info("Resetting display...")
             # Reset pulse: high → low → high with delays
             GPIO.output(self.reset_pin, GPIO.HIGH)
-            time.sleep(0.05)
+            time.sleep(self.RESET_PULSE_HIGH_S)
             GPIO.output(self.reset_pin, GPIO.LOW)
-            time.sleep(0.05)
+            time.sleep(self.RESET_PULSE_LOW_S)
             GPIO.output(self.reset_pin, GPIO.HIGH)
-            time.sleep(0.15)  # Wait for reset to complete
+            time.sleep(self.RESET_STABILIZE_S)
             logger.info("Display reset complete")
         except Exception as e:
             logger.error(f"Reset failed: {e}")
             raise
 
-    def init_display(self):
-        """Initialize the display using the complete Adafruit GC9A01A sequence.
+    def set_madctl(self, madctl: int):
+        """Update the MADCTL register value used for panel addressing."""
+        self.madctl = self._coerce_byte(madctl, "madctl")
 
-        This is the authoritative initialization based on Adafruit's working implementation.
-        Includes all critical registers and commands that were missing before.
-        """
-        logger.info("Initializing GC9A01 display (Complete Adafruit sequence)...")
+        if self.initialized:
+            self._apply_memory_access_control()
+
+        logger.info(f"MADCTL set to 0x{self.madctl:02X}")
+
+    def init_display(self):
+        """Initialize the display using Adafruit's packed GC9A01A sequence."""
+        logger.info("Initializing GC9A01 display (Adafruit CircuitPython sequence)...")
 
         try:
-            # ===== Hardware Reset =====
             logger.debug("Hardware reset")
             self.reset()
 
-            # ===== Register Configuration (Manufacturer sequence) =====
-            # This sequence comes from Adafruit's initialization array
-            # Many registers are undocumented, but necessary for proper display function
-
-            # Enable Inter-Register access
-            self._write_command_data(0xFE, bytes([0x00])) # Inter Register Enable 1
-            self._write_command_data(0xEF, bytes([0x00])) # Inter Register Enable 2
-
-
-            logger.debug("Sending undocumented register initialization (0x84-0x8F)")
-            self._write_command_data(0xEB, bytes([0x14]))
-            self._write_command_data(0x84, bytes([0x40]))
-            self._write_command_data(0x85, bytes([0xFF]))
-            self._write_command_data(0x86, bytes([0xFF]))
-            self._write_command_data(0x87, bytes([0xFF]))
-            self._write_command_data(0x88, bytes([0x0A]))
-            self._write_command_data(0x89, bytes([0x21]))
-            self._write_command_data(0x8A, bytes([0x00]))
-            self._write_command_data(0x8B, bytes([0x80]))
-            self._write_command_data(0x8C, bytes([0x01]))
-            self._write_command_data(0x8D, bytes([0x01]))
-            self._write_command_data(0x8E, bytes([0xFF]))
-            self._write_command_data(0x8F, bytes([0xFF]))
-
-            logger.debug("Configuring display orientation and color order")
-            self._write_command_data(0xB6, bytes([0x00, 0x00]))
-            self._write_command_data(self.CMD_MEMORY_ACCESS, bytes([0x40 | 0x08]))  # MX | BGR
-            self._write_command_data(self.CMD_INTERFACE_PIXEL_FORMAT, bytes([0x05]))  # RGB565
-
-            logger.debug("Sending more undocumented registers (0x90, 0xBD, 0xBC, 0xFF)")
-            self._write_command_data(0x90, bytes([0x08, 0x08, 0x08, 0x08]))
-            self._write_command_data(0xBD, bytes([0x06]))
-            self._write_command_data(0xBC, bytes([0x00]))
-            self._write_command_data(0xFF, bytes([0x60, 0x01, 0x04]))
-
-            logger.debug("Configuring power control")
-            self._write_command_data(0xC3, bytes([0x13]))  # Power control 1
-            self._write_command_data(0xC4, bytes([0x13]))  # Power control 2
-            self._write_command_data(0xC9, bytes([0x22]))  # Power control 3
-            self._write_command_data(0xBE, bytes([0x11]))
-
-            logger.debug("Sending gamma curves (Adafruit values)")
-            self._write_command_data(0xE1, bytes([0x10, 0x0E]))
-            self._write_command_data(0xDF, bytes([0x21, 0x0c, 0x02]))
-            self._write_command_data(0xF0, bytes([0x45, 0x09, 0x08, 0x08, 0x26, 0x2A]))  # Gamma 1
-            self._write_command_data(0xF1, bytes([0x43, 0x70, 0x72, 0x36, 0x37, 0x6F]))  # Gamma 2
-            self._write_command_data(0xF2, bytes([0x45, 0x09, 0x08, 0x08, 0x26, 0x2A]))  # Gamma 3
-            self._write_command_data(0xF3, bytes([0x43, 0x70, 0x72, 0x36, 0x37, 0x6F]))  # Gamma 4
-
-            logger.debug("Sending timing and frame rate configuration")
-            self._write_command_data(0xED, bytes([0x1B, 0x0B]))
-            self._write_command_data(0xAE, bytes([0x77]))
-            self._write_command_data(0xCD, bytes([0x63]))
-            self._write_command_data(self.CMD_FRAME_RATE, bytes([0x34]))
-
-            logger.debug("Sending clock divider and display control registers")
-            self._write_command_data(0x62, bytes([0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0F, 0x71, 0xEF, 0x70, 0x70]))
-            self._write_command_data(0x63, bytes([0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x13, 0x71, 0xF3, 0x70, 0x70]))
-            self._write_command_data(0x64, bytes([0x28, 0x29, 0xF1, 0x01, 0xF1, 0x00, 0x07]))
-            self._write_command_data(0x66, bytes([0x3C, 0x00, 0xCD, 0x67, 0x45, 0x45, 0x10, 0x00, 0x00, 0x00]))
-            self._write_command_data(0x67, bytes([0x00, 0x3C, 0x00, 0x00, 0x00, 0x01, 0x54, 0x10, 0x32, 0x98]))
-            self._write_command_data(0x74, bytes([0x10, 0x85, 0x80, 0x00, 0x00, 0x4E, 0x00]))
-            self._write_command_data(0x98, bytes([0x3e, 0x07]))
-
-            # ===== CRITICAL: Display Control Commands =====
-            logger.debug("Enabling tearing effect")
-            self._write_command(self.CMD_TEARING_EFFECT)
-
-            # ===== Sleep Out =====
-            logger.debug("Exiting sleep mode")
-            self._write_command(self.CMD_SLEEP_OUT)
-            time.sleep(0.150)  # 150ms delay as per Adafruit
-
-            # ===== Normal Mode =====
-            logger.debug("Setting normal display mode")
-            self._write_command(self.CMD_NORMAL_ON)
-            time.sleep(0.010)
-
-            # ===== Display ON =====
-            logger.debug("Turning on display")
-            self._write_command(self.CMD_DISPLAY_ON)
-            time.sleep(0.150)  # 150ms delay as per Adafruit
-
-            # ===== Brightness Control =====
-            logger.debug("Setting brightness to maximum")
-            self._write_command_data(self.CMD_BRIGHTNESS, bytes([0xFF]))  # Max brightness
-            time.sleep(0.010)
+            logger.debug("Running packed Adafruit init sequence")
+            self._run_init_sequence(self.ADAFRUIT_INIT_SEQUENCE)
 
             self.initialized = True
-            logger.info("✓ Display initialization complete (Full Adafruit sequence)")
+            logger.info("✓ Display initialization complete")
 
         except Exception as e:
             logger.error(f"Display initialization failed: {e}")

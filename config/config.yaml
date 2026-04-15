@@ -13,6 +13,7 @@ display:
   width: 240
   height: 240
   rotation: 0                # 0, 90, 180, 270 degrees
+  madctl: 0x48              # GC9A01 memory access order. Try 0x08, 0x48, or 0x88 if the panel shows striping/greys
   refresh_rate_hz: 5         # Updates per second (SPI can handle higher refresh rates)
 
 mqtt:

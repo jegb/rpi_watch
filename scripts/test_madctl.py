@@ -64,21 +64,8 @@ def test_madctl_values():
             logger.info(f"Testing MADCTL = 0x{madctl_val:02X}: {description}")
             logger.info(f"Press Ctrl+C to skip to next test")
             
-            # Reset display
-            display.reset()
-            time.sleep(0.15)
-            
-            # Re-initialize
-            display._write_command(0x01)  # Software reset
-            time.sleep(0.120)
-            display._write_command(0x11)  # Sleep out
-            time.sleep(0.120)
-            
-            # Set new MADCTL
-            display._write_command_data(0x36, bytes([madctl_val]))
-            
-            # Set pixel format
-            display._write_command_data(0x3A, bytes([0x05]))  # RGB565
+            display.set_madctl(madctl_val)
+            display.init_display()
             
             # Set address window
             display.set_address_window(0, 0, 239, 239)
@@ -87,12 +74,7 @@ def test_madctl_values():
             display._write_command(0x2C)
             white_data = bytes([0xFF, 0xFF]) * (240 * 240)
             display._write_data(white_data)
-            
-            # Display on
-            display._write_command(0x13)  # Normal mode
-            display._write_command(0x29)  # Display on
-            time.sleep(0.150)
-            
+
             logger.info(f"  Displaying for 2 seconds (white fill)...")
             time.sleep(2)
         
