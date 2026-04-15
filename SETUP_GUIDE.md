@@ -486,16 +486,45 @@ ALL TESTS PASSED ✓
 Test images saved to /tmp/test_*.png
 ```
 
-### Step 4: Test Layout System
+### Step 4: Display Live Test (Watch Your Display!)
 
 ```bash
-# View all available layouts
+# Render images DIRECTLY to your GC9A01 display
+python3 scripts/test_display_live.py
+```
+
+**This is the real hardware test!** Watch your circular display as it shows:
+- Text rendering at different sizes
+- Large metric values
+- Metric with gauge backgrounds
+- Multi-ring gauges
+- Circular gauge components
+- Progress indicators
+- All 5 color schemes
+
+Each test displays for 3 seconds. If you see graphics on your display, the system is working perfectly!
+
+**Expected Output:**
+```
+✓ Display initialized successfully
+Displaying: Text: Large metric ('42.5')
+  Showing for 3 seconds...
+Displaying: Large Metric: Temperature
+  Showing for 3 seconds...
+[... more tests ...]
+ALL TESTS PASSED ✓
+```
+
+### Step 5: View Component Rendering (Reference Images)
+
+```bash
+# Generate reference PNG images (saved to /tmp)
 python3 scripts/demo_layouts.py
 ```
 
-This generates demo images showing all 7 layouts with different data.
+This creates PNG files showing all 7 layouts and variations (useful for documentation or offline viewing).
 
-### Step 5: Run Integration Tests
+### Step 6: Run Integration Tests
 
 ```bash
 # Run comprehensive integration tests
