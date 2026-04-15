@@ -201,32 +201,16 @@ spidev             3.5 (or later)
 PyYAML             6.0 (or later)
 ```
 
-### Step 4: Install Project (Optional)
+### Step 4: (Optional) Install Project in Development Mode
+
+If you want to use the package directly instead of running scripts:
 
 ```bash
 # Make sure venv is still activated
 pip install -e .
 ```
 
-**Expected output:**
-```
-Pillow             10.0.0 (or later)
-paho-mqtt          2.1.0 (or later)
-RPi.GPIO           0.7.0 (or later)
-spidev             3.5 (or later)
-PyYAML             6.0 (or later)
-```
-
-### Step 4: Install Project (Optional)
-
-For development, you can install in editable mode:
-
-```bash
-# Install project in development mode
-pip install -e .
-
-# Or skip if just using scripts directly
-```
+This allows you to import and use `rpi_watch` as a Python package in your own scripts. If you're just using the provided scripts, this step is optional.
 
 ---
 
