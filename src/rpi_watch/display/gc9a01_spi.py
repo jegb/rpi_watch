@@ -116,8 +116,12 @@ class GC9A01_SPI:
     def connect(self):
         """Open SPI bus connection and configure GPIO."""
         try:
-            # Set up GPIO
-            GPIO.setmode(GPIO.BCM)
+            # Set up GPIO (setmode can only be called once, so catch exception if already set)
+            try:
+                GPIO.setmode(GPIO.BCM)
+            except RuntimeError:
+                # Mode already set, which is fine - just continue
+                pass
             GPIO.setwarnings(False)
 
             # Configure pins as outputs
