@@ -130,8 +130,18 @@ class RPiWatch:
             logger.info("Starting main event loop")
             self.running = True
 
-            # Start MQTT subscriber
-            self.mqtt_subscriber.start()
+            # Start MQTT subscriber (optional - app works offline if broker unavailable)
+            try:
+                logger.info("Attempting to connect to MQTT broker...")
+                self.mqtt_subscriber.start()
+                logger.info("✓ MQTT subscriber started")
+            except TimeoutError:
+                logger.warning("⚠ MQTT broker timeout - running in offline mode")
+                logger.warning("  App will display metrics if manually updated")
+                logger.warning("  To use MQTT: verify broker is running at {self.mqtt_subscriber.broker_host}:{self.mqtt_subscriber.broker_port}")
+            except Exception as e:
+                logger.warning(f"⚠ Failed to connect to MQTT broker: {e}")
+                logger.warning("  Running in offline mode - display ready for test data")
 
             # Get configuration
             display_config = self.config.get('display', {})

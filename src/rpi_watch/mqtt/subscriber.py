@@ -68,6 +68,9 @@ class MQTTSubscriber:
         self.client.on_disconnect = self._on_disconnect
         self.client.on_subscribe = self._on_subscribe
 
+        # Set socket timeout to 5 seconds (fail fast if broker unavailable)
+        self.client._socket_connect_timeout = 5
+
         self.running = False
         self.connected = False
         self.last_value = None

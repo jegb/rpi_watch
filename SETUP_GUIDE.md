@@ -342,11 +342,15 @@ Pin 5: RES        ──→  GPIO 25 (Reset)
 Pin 6: DC         ──→  GPIO 24 (Data/Command)
 Pin 7: CS         ──→  GPIO 8 (Chip Select, optional)
                        or GND if not used
-Pin 8: BLK        ──→  3.3V (constant) or GPIO PWM
-                       (backlight - tie to 3.3V for full brightness)
+Pin 8: BLK        ──→  3.3V (Backlight)
 ```
 
-**Important**: Pin order is critical. Double-check against your display before powering on.
+⚠️ **IMPORTANT BLK PIN (Pin 8):**
+- **For full brightness:** Tie directly to **3.3V** (recommended for simplicity)
+- **Do NOT leave floating** - this may result in no backlight
+- Optional: Use GPIO PWM for brightness control (advanced)
+
+**Pin order:** Critical - double-check against your display before powering on.
 
 **Wiring Best Practices:**
 - Use short wires (< 30cm) for SPI
@@ -537,9 +541,11 @@ Tests the entire system working together.
 
 ## Running the Application
 
-### Step 1: Start MQTT Broker (if not running)
+### Step 1: (Optional) Start MQTT Broker
 
-On your MQTT broker machine:
+The application works in **offline mode** if the MQTT broker is unavailable. However, for live metric data, you'll need:
+
+**On your MQTT broker machine:**
 
 ```bash
 # Start Mosquitto MQTT broker
@@ -550,56 +556,41 @@ sudo systemctl start mosquitto
 sudo systemctl status mosquitto
 ```
 
-### Step 2: Verify MQTT Connectivity
-
-From Raspberry Pi:
+**From Raspberry Pi, test the connection:**
 
 ```bash
-# Test connection to MQTT broker
-python3 -c "
-import paho.mqtt.client as mqtt
-import time
-
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print('✓ Connected to MQTT broker')
-    else:
-        print(f'✗ Failed to connect, code {rc}')
-
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
-client.on_connect = on_connect
-client.connect('192.168.0.214', 1883, 60)
-client.loop_start()
-time.sleep(2)
-client.loop_stop()
-"
+ping 192.168.0.214    # Test if broker machine is reachable
+mosquitto_sub -h 192.168.0.214 -t "airquality/sensor" -v  # See incoming messages
 ```
 
-### Step 3: Start Main Application
+### Step 2: Start the Application (with or without MQTT)
 
 ```bash
-# Activate virtual environment
 source venv/bin/activate
-
-# Run main application
 python3 -m rpi_watch.main
 ```
 
 **Expected output:**
+
+If MQTT broker is running:
 ```
-2026-04-15 14:30:00 - rpi_watch.main - INFO - Initializing RPi Watch application
-2026-04-15 14:30:00 - rpi_watch.display.gc9a01_spi - INFO - GC9A01_SPI driver initialized
-2026-04-15 14:30:00 - rpi_watch.display.gc9a01_spi - INFO - Connected to SPI bus 0.0 at 10.0MHz
-2026-04-15 14:30:01 - rpi_watch.display.gc9a01_spi - INFO - Initializing GC9A01 display...
-2026-04-15 14:30:01 - rpi_watch.display.gc9a01_spi - INFO - Display initialization complete
-2026-04-15 14:30:02 - rpi_watch.mqtt.subscriber - INFO - Connected to MQTT broker: 192.168.0.214:1883
-2026-04-15 14:30:02 - rpi_watch.mqtt.subscriber - INFO - Subscribed to topic: airquality/sensor
-2026-04-15 14:30:03 - rpi_watch.main - INFO - Waiting for MQTT metric...
+[INFO] Attempting to connect to MQTT broker...
+[INFO] ✓ MQTT subscriber started
+[INFO] Connected to MQTT broker: 192.168.0.214:1883
+[INFO] Subscribed to topic: airquality/sensor
 ```
 
-Display should show "..." (waiting) until first metric arrives.
+If MQTT broker is NOT running:
+```
+[INFO] Attempting to connect to MQTT broker...
+[WARNING] ⚠ MQTT broker timeout - running in offline mode
+[WARNING]   App will display metrics if manually updated
+[WARNING]   To use MQTT: verify broker is running at 192.168.0.214:1883
+```
 
-### Step 4: Publish Test Metric
+**Offline mode:** The app will show a waiting message ("...") until you publish a metric via MQTT or update the metric_store manually.
+
+### Step 3: Publish Test Metric (if MQTT is running)
 
 From another terminal:
 
@@ -613,7 +604,7 @@ mosquitto_pub -h 192.168.0.214 -t airquality/sensor -m '25.5'
 
 **Expected result**: Display updates with the metric value
 
-### Step 5: Stop Application
+### Step 4: Stop Application
 
 ```bash
 # Press Ctrl+C in the application terminal
