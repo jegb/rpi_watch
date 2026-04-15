@@ -60,6 +60,13 @@ class GC9A01_SPI:
     CMD_POSITIVE_GAMMA = 0xF0       # Positive gamma curve
     CMD_NEGATIVE_GAMMA = 0xF1       # Negative gamma curve
     CMD_INTERFACE_PIXEL_FORMAT = 0x3A # Interface pixel format
+    CMD_TEARING_EFFECT = 0x35       # Tearing effect line ON
+    CMD_DISPLAY_INVERT_ON = 0x21    # Invert display colors (CRITICAL!)
+    CMD_SLEEP_OUT = 0x11            # Exit sleep mode
+    CMD_DISPLAY_ON = 0x29           # Display ON
+    CMD_FRAME_RATE = 0xE8           # Frame rate control
+    CMD_INREGEN1 = 0xFE             # Inter register enable 1
+    CMD_INREGEN2 = 0xEF             # Inter register enable 2
 
     def __init__(
         self,
@@ -260,90 +267,96 @@ class GC9A01_SPI:
             raise
 
     def init_display(self):
-        """Initialize the display with enhanced power-on sequence.
+        """Initialize the display using the complete Adafruit GC9A01A sequence.
 
-        Sets up the display in 16-bit RGB565 mode with proper power control
-        and gamma calibration (based on Adafruit GC9A01 reference).
+        This is the authoritative initialization based on Adafruit's working implementation.
+        Includes all critical registers and commands that were missing before.
         """
-        logger.info("Initializing GC9A01 display (Adafruit sequence)...")
+        logger.info("Initializing GC9A01 display (Complete Adafruit sequence)...")
 
         try:
             # ===== Hardware Reset =====
-            logger.debug("Step 1: Hardware reset")
+            logger.debug("Hardware reset")
             self.reset()
-            time.sleep(0.05)
 
-            # ===== Software Reset =====
-            logger.debug("Step 2: Software reset")
-            self._write_command(self.CMD_RESET)
-            time.sleep(0.120)
+            # ===== Register Configuration (Manufacturer sequence) =====
+            # This sequence comes from Adafruit's initialization array
+            # Many registers are undocumented, but necessary for proper display function
 
-            # ===== Sleep Mode Off (Wake Up) =====
-            logger.debug("Step 3: Exit sleep mode")
+            logger.debug("Sending undocumented register initialization (0x84-0x8F)")
+            self._write_command_data(0xEB, bytes([0x14]))
+            self._write_command_data(0x84, bytes([0x40]))
+            self._write_command_data(0x85, bytes([0xFF]))
+            self._write_command_data(0x86, bytes([0xFF]))
+            self._write_command_data(0x87, bytes([0xFF]))
+            self._write_command_data(0x88, bytes([0x0A]))
+            self._write_command_data(0x89, bytes([0x21]))
+            self._write_command_data(0x8A, bytes([0x00]))
+            self._write_command_data(0x8B, bytes([0x80]))
+            self._write_command_data(0x8C, bytes([0x01]))
+            self._write_command_data(0x8D, bytes([0x01]))
+            self._write_command_data(0x8E, bytes([0xFF]))
+            self._write_command_data(0x8F, bytes([0xFF]))
+
+            logger.debug("Configuring display orientation and color order")
+            self._write_command_data(0xB6, bytes([0x00, 0x00]))
+            self._write_command_data(self.CMD_MEMORY_ACCESS, bytes([0x40 | 0x08]))  # MX | BGR
+            self._write_command_data(self.CMD_INTERFACE_PIXEL_FORMAT, bytes([0x05]))  # RGB565
+
+            logger.debug("Sending more undocumented registers (0x90, 0xBD, 0xBC, 0xFF)")
+            self._write_command_data(0x90, bytes([0x08, 0x08, 0x08, 0x08]))
+            self._write_command_data(0xBD, bytes([0x06]))
+            self._write_command_data(0xBC, bytes([0x00]))
+            self._write_command_data(0xFF, bytes([0x60, 0x01, 0x04]))
+
+            logger.debug("Configuring power control")
+            self._write_command_data(0xC3, bytes([0x13]))  # Power control 1
+            self._write_command_data(0xC4, bytes([0x13]))  # Power control 2
+            self._write_command_data(0xC9, bytes([0x22]))  # Power control 3
+            self._write_command_data(0xBE, bytes([0x11]))
+
+            logger.debug("Sending gamma curves (Adafruit values)")
+            self._write_command_data(0xE1, bytes([0x10, 0x0E]))
+            self._write_command_data(0xDF, bytes([0x21, 0x0c, 0x02]))
+            self._write_command_data(0xF0, bytes([0x45, 0x09, 0x08, 0x08, 0x26, 0x2A]))  # Gamma 1
+            self._write_command_data(0xF1, bytes([0x43, 0x70, 0x72, 0x36, 0x37, 0x6F]))  # Gamma 2
+            self._write_command_data(0xF2, bytes([0x45, 0x09, 0x08, 0x08, 0x26, 0x2A]))  # Gamma 3
+            self._write_command_data(0xF3, bytes([0x43, 0x70, 0x72, 0x36, 0x37, 0x6F]))  # Gamma 4
+
+            logger.debug("Sending timing and frame rate configuration")
+            self._write_command_data(0xED, bytes([0x1B, 0x0B]))
+            self._write_command_data(0xAE, bytes([0x77]))
+            self._write_command_data(0xCD, bytes([0x63]))
+            self._write_command_data(self.CMD_FRAME_RATE, bytes([0x34]))
+
+            logger.debug("Sending clock divider and display control registers")
+            self._write_command_data(0x62, bytes([0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0F, 0x71, 0xEF, 0x70, 0x70]))
+            self._write_command_data(0x63, bytes([0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x13, 0x71, 0xF3, 0x70, 0x70]))
+            self._write_command_data(0x64, bytes([0x28, 0x29, 0xF1, 0x01, 0xF1, 0x00, 0x07]))
+            self._write_command_data(0x66, bytes([0x3C, 0x00, 0xCD, 0x67, 0x45, 0x45, 0x10, 0x00, 0x00, 0x00]))
+            self._write_command_data(0x67, bytes([0x00, 0x3C, 0x00, 0x00, 0x00, 0x01, 0x54, 0x10, 0x32, 0x98]))
+            self._write_command_data(0x74, bytes([0x10, 0x85, 0x80, 0x00, 0x00, 0x4E, 0x00]))
+            self._write_command_data(0x98, bytes([0x3e, 0x07]))
+
+            # ===== CRITICAL: Display Control Commands =====
+            logger.debug("Enabling tearing effect")
+            self._write_command(self.CMD_TEARING_EFFECT)
+
+            logger.debug("CRITICAL: Inverting display colors")
+            self._write_command(self.CMD_DISPLAY_INVERT_ON)  # THIS WAS MISSING!
+
+            # ===== Sleep Out =====
+            logger.debug("Exiting sleep mode")
             self._write_command(self.CMD_SLEEP_OUT)
-            time.sleep(0.120)
-
-            # ===== Pixel Format Configuration =====
-            logger.debug("Step 4: Set pixel format to RGB565")
-            self._write_command_data(self.CMD_INTERFACE_PIXEL_FORMAT, bytes([0x55]))  # 0x55 = RGB565, 16-bit
-            time.sleep(0.10)
-
-            # ===== Memory Access Control (Rotation) =====
-            logger.debug("Step 5: Configure memory access")
-            # 0x00: MY=0, MX=0, MV=0, ML=0, BGR=0 (normal)
-            # For different rotations: 0x00=0°, 0x60=90°, 0xA0=180°, 0xC0=270°
-            self._write_command_data(self.CMD_MEMORY_ACCESS, bytes([0x00]))
-            time.sleep(0.01)
-
-            # ===== Power Control Sequence (Adafruit recommended) =====
-            logger.debug("Step 6: Power control configuration")
-            # Power control 1 - VRH[5:0] voltage regulator
-            self._write_command_data(self.CMD_POWER_CONTROL_1, bytes([0x14]))
-            time.sleep(0.01)
-
-            # Power control 2 - BT[2:0] AVDD / GVDD voltage
-            self._write_command_data(self.CMD_POWER_CONTROL_2, bytes([0xA2]))
-            time.sleep(0.01)
-
-            # Power control 3 - Voltage follower
-            self._write_command_data(self.CMD_POWER_CONTROL_3, bytes([0x02]))
-            time.sleep(0.01)
-
-            # ===== Gamma Curve Calibration =====
-            logger.debug("Step 7: Configure gamma curves")
-            # Positive gamma correction
-            positive_gamma = bytes([
-                0x00, 0x04, 0x09, 0x0E, 0x14, 0x28, 0x35, 0x42,
-                0x4F, 0x3D, 0x3C, 0x3A, 0x38, 0x37, 0x36, 0x35
-            ])
-            self._write_command_data(self.CMD_POSITIVE_GAMMA, positive_gamma)
-            time.sleep(0.01)
-
-            # Negative gamma correction
-            negative_gamma = bytes([
-                0x00, 0x05, 0x0A, 0x0F, 0x15, 0x29, 0x36, 0x43,
-                0x50, 0x3E, 0x3D, 0x3B, 0x39, 0x38, 0x37, 0x36
-            ])
-            self._write_command_data(self.CMD_NEGATIVE_GAMMA, negative_gamma)
-            time.sleep(0.01)
-
-            # ===== Display Configuration =====
-            logger.debug("Step 8: Normal display mode")
-            self._write_command(self.CMD_NORMAL_ON)
-            time.sleep(0.01)
+            time.sleep(0.128)
 
             # ===== Display ON =====
-            logger.debug("Step 9: Turn on display")
+            logger.debug("Turning on display")
             self._write_command(self.CMD_DISPLAY_ON)
-            time.sleep(0.120)
-
-            # ===== Brightness Control =====
-            logger.debug("Step 10: Set brightness to maximum")
-            self._write_command_data(self.CMD_BRIGHTNESS, bytes([0xFF]))  # 0xFF = full brightness
-            time.sleep(0.01)
+            time.sleep(0.128)
 
             self.initialized = True
-            logger.info("✓ Display initialization complete (Adafruit sequence)")
+            logger.info("✓ Display initialization complete (Full Adafruit sequence)")
 
         except Exception as e:
             logger.error(f"Display initialization failed: {e}")
