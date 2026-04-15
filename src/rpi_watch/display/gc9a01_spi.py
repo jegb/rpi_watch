@@ -61,9 +61,6 @@ class GC9A01_SPI:
     CMD_NEGATIVE_GAMMA = 0xF1       # Negative gamma curve
     CMD_INTERFACE_PIXEL_FORMAT = 0x3A # Interface pixel format
     CMD_TEARING_EFFECT = 0x35       # Tearing effect line ON
-    CMD_DISPLAY_INVERT_ON = 0x21    # Invert display colors (CRITICAL!)
-    CMD_SLEEP_OUT = 0x11            # Exit sleep mode
-    CMD_DISPLAY_ON = 0x29           # Display ON
     CMD_FRAME_RATE = 0xE8           # Frame rate control
     CMD_INREGEN1 = 0xFE             # Inter register enable 1
     CMD_INREGEN2 = 0xEF             # Inter register enable 2
@@ -342,18 +339,25 @@ class GC9A01_SPI:
             logger.debug("Enabling tearing effect")
             self._write_command(self.CMD_TEARING_EFFECT)
 
-            logger.debug("CRITICAL: Inverting display colors")
-            self._write_command(self.CMD_DISPLAY_INVERT_ON)  # THIS WAS MISSING!
-
             # ===== Sleep Out =====
             logger.debug("Exiting sleep mode")
             self._write_command(self.CMD_SLEEP_OUT)
-            time.sleep(0.128)
+            time.sleep(0.150)  # 150ms delay as per Adafruit
+
+            # ===== Normal Mode =====
+            logger.debug("Setting normal display mode")
+            self._write_command(self.CMD_NORMAL_ON)
+            time.sleep(0.010)
 
             # ===== Display ON =====
             logger.debug("Turning on display")
             self._write_command(self.CMD_DISPLAY_ON)
-            time.sleep(0.128)
+            time.sleep(0.150)  # 150ms delay as per Adafruit
+
+            # ===== Brightness Control =====
+            logger.debug("Setting brightness to maximum")
+            self._write_command_data(self.CMD_BRIGHTNESS, bytes([0xFF]))  # Max brightness
+            time.sleep(0.010)
 
             self.initialized = True
             logger.info("✓ Display initialization complete (Full Adafruit sequence)")
