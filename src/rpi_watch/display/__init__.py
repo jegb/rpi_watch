@@ -9,6 +9,19 @@ from .components import (
     CircularGauge,
     ProgressBar,
 )
+from .layouts import (
+    LayoutType,
+    ColorScheme,
+    DisplayLayout,
+    LargeMetricLayout,
+    MetricWithGaugeLayout,
+    MultiRingGaugeLayout,
+    TextOverGaugeLayout,
+    SplitMetricsLayout,
+    RadialDashboardLayout,
+    ProgressStackLayout,
+    get_layout,
+)
 
 __all__ = [
     "GC9A01_SPI",
@@ -18,4 +31,15 @@ __all__ = [
     "TextRenderer",
     "CircularGauge",
     "ProgressBar",
+    "LayoutType",
+    "ColorScheme",
+    "DisplayLayout",
+    "LargeMetricLayout",
+    "MetricWithGaugeLayout",
+    "MultiRingGaugeLayout",
+    "TextOverGaugeLayout",
+    "SplitMetricsLayout",
+    "RadialDashboardLayout",
+    "ProgressStackLayout",
+    "get_layout",
 ]
