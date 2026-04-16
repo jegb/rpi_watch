@@ -100,9 +100,9 @@ class GC9A01_SPI:
         spi_bus: int = 0,
         spi_device: int = 0,
         spi_speed: int = 10000000,  # 10 MHz
-        dc_pin: int = 24,            # Data/Command
-        reset_pin: int = 25,         # Reset
-        cs_pin: Optional[int] = 8,   # Chip Select (optional)
+        dc_pin: int = 25,            # Data/Command
+        reset_pin: int = 27,         # Reset
+        cs_pin: Optional[int] = None,   # Optional manual Chip Select
         madctl: int = DEFAULT_MADCTL,
     ):
         """Initialize the GC9A01 SPI driver.
@@ -113,7 +113,8 @@ class GC9A01_SPI:
             spi_speed: SPI clock speed in Hz (default 10 MHz)
             dc_pin: GPIO pin for Data/Command control (BCM numbering)
             reset_pin: GPIO pin for Reset control (BCM numbering)
-            cs_pin: GPIO pin for Chip Select (optional, can be tied to GND)
+            cs_pin: Optional GPIO pin for manual Chip Select control. Leave as
+                None when using the SPI controller's hardware CE line.
             madctl: Memory Access Control register value. Common round-panel
                 values are 0x08, 0x48, and 0x88.
         """

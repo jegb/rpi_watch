@@ -602,8 +602,8 @@ def main() -> int:
         "spi_bus": args.spi_bus if args.spi_bus is not None else display_defaults.get("spi_bus", 0),
         "spi_device": args.spi_device if args.spi_device is not None else display_defaults.get("spi_device", 0),
         "spi_speed": args.spi_speed if args.spi_speed is not None else display_defaults.get("spi_speed", 10_000_000),
-        "dc_pin": args.dc_pin if args.dc_pin is not None else display_defaults.get("spi_dc_pin", 24),
-        "reset_pin": args.reset_pin if args.reset_pin is not None else display_defaults.get("spi_reset_pin", 25),
+        "dc_pin": args.dc_pin if args.dc_pin is not None else display_defaults.get("spi_dc_pin", 25),
+        "reset_pin": args.reset_pin if args.reset_pin is not None else display_defaults.get("spi_reset_pin", 27),
         "cs_pin": display_defaults.get("spi_cs_pin", None) if args.cs_pin == ARG_UNSET else args.cs_pin,
         "madctl": args.madctl if args.madctl is not None else display_defaults.get("madctl", GC9A01_SPI.DEFAULT_MADCTL),
     }
