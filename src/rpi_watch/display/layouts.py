@@ -588,10 +588,10 @@ class PMBarsLayout(DisplayLayout):
     """Layout: four particulate matter bars with a shared unit label."""
 
     DEFAULT_FIELDS = (
-        ("pm_1_0", "PM1.0"),
-        ("pm_2_5", "PM2.5"),
-        ("pm_4_0", "PM4.0"),
-        ("pm_10_0", "PM10.0"),
+        ("pm_1_0", "1.0"),
+        ("pm_2_5", "2.5"),
+        ("pm_4_0", "4.0"),
+        ("pm_10_0", "10"),
     )
 
     DEFAULT_COLORS = {
@@ -692,13 +692,13 @@ class PMBarsLayout(DisplayLayout):
         self,
         payload: Dict[str, Any],
         *,
-        title: str = "PARTICLES",
+        title: str = "PM",
         unit_label: str = "µg/m³",
         metric_fields: Optional[list] = None,
         metric_colors: Optional[dict[str, Tuple[int, int, int]]] = None,
         max_value: Optional[float] = None,
         auto_scale_floor: float = 25.0,
-        orientation: str = "horizontal",
+        orientation: str = "vertical",
         bar_gap: int = 6,
         scale_padding_ratio: float = 0.18,
     ) -> Image.Image:

@@ -448,7 +448,7 @@ class RPiWatch:
         metric_config = self._get_metric_display_config()
         image = self.pm_bars_layout.render(
             payload,
-            title=str(metric_config.get('pm_bars_title', 'PARTICLES')),
+            title=str(metric_config.get('pm_bars_title', 'PM')),
             unit_label=str(metric_config.get('pm_bars_unit_label', 'µg/m³')),
             metric_fields=metric_config.get(
                 'pm_bar_fields',
@@ -460,7 +460,7 @@ class RPiWatch:
             },
             max_value=metric_config.get('pm_bars_max_value'),
             auto_scale_floor=float(metric_config.get('pm_bars_auto_scale_floor', 25.0)),
-            orientation=str(metric_config.get('pm_bars_orientation', 'horizontal')),
+            orientation=str(metric_config.get('pm_bars_orientation', 'vertical')),
             bar_gap=int(metric_config.get('pm_bars_gap', 6)),
             scale_padding_ratio=float(metric_config.get('pm_bars_scale_padding_ratio', 0.18)),
         )
