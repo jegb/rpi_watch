@@ -13,6 +13,11 @@ from enum import Enum
 
 from PIL import Image, ImageDraw, ImageFont
 
+try:
+    RESAMPLE_LANCZOS = Image.Resampling.LANCZOS
+except AttributeError:  # Pillow < 9.1
+    RESAMPLE_LANCZOS = Image.LANCZOS
+
 from .fonts import load_font
 
 logger = logging.getLogger(__name__)
@@ -813,7 +818,7 @@ class CircularGauge:
         if sweep <= 0:
             return
 
-        steps = max(int(abs(sweep) * 2), 8)
+        steps = max(int(abs(sweep) * max(4.0, radius / 32.0)), 24)
         points = [
             self._point_on_circle(
                 center_x,
@@ -845,6 +850,30 @@ class CircularGauge:
                     ],
                     fill=color,
                 )
+
+    def _render_supersampled(
+        self,
+        *,
+        background_color: Tuple[int, int, int],
+        draw_callback,
+        scale: int = 4,
+    ) -> Image.Image:
+        """Render to a higher-resolution canvas, then downsample for smoother edges."""
+        render_scale = max(1, int(scale))
+        if render_scale == 1:
+            img = Image.new('RGB', (self.width, self.height), background_color)
+            draw = ImageDraw.Draw(img)
+            draw_callback(draw, 1)
+            return img
+
+        hi_img = Image.new(
+            'RGB',
+            (self.width * render_scale, self.height * render_scale),
+            background_color,
+        )
+        hi_draw = ImageDraw.Draw(hi_img)
+        draw_callback(hi_draw, render_scale)
+        return hi_img.resize((self.width, self.height), RESAMPLE_LANCZOS)
 
     def _draw_needle(
         self,
@@ -976,80 +1005,86 @@ class CircularGauge:
         rounded_caps: bool = True,
     ) -> Image.Image:
         """Render a configurable progress ring using threshold-based gradient colors."""
-        img = Image.new('RGB', (self.width, self.height), background_color)
-        draw = ImageDraw.Draw(img)
-
         start_angle, end_angle = self._normalize_arc_angles(start_angle, end_angle)
         sweep = end_angle - start_angle
         clamped_value = self._clamp(value, min_value, max_value)
         ratio = 0.0 if max_value == min_value else (clamped_value - min_value) / (max_value - min_value)
         progress_end = start_angle + (sweep * ratio)
 
-        ring_radius = self.outer_radius - max(2, thickness // 2)
-        self._draw_arc_segment(
-            draw,
-            center_x=self.center_x,
-            center_y=self.center_y,
-            radius=ring_radius,
-            angle_start=start_angle,
-            angle_end=end_angle,
-            color=track_color,
-            width=thickness,
-            rounded_caps=rounded_caps,
-        )
+        def draw_gradient_ring(draw: ImageDraw.ImageDraw, scale: int) -> None:
+            center_x = self.center_x * scale
+            center_y = self.center_y * scale
+            scaled_thickness = max(1, thickness * scale)
+            ring_radius = (self.outer_radius * scale) - max(2 * scale, scaled_thickness // 2)
 
-        if ratio <= 0:
-            return img
-
-        steps = max(int(abs(progress_end - start_angle) * 2), 8)
-        for index in range(steps):
-            segment_start = start_angle + ((progress_end - start_angle) * (index / steps))
-            segment_end = start_angle + ((progress_end - start_angle) * ((index + 1) / steps))
-            midpoint_ratio = (index + 0.5) / steps
-            midpoint_value = min_value + ((clamped_value - min_value) * midpoint_ratio)
-            segment_color = self.color_from_thresholds(
-                midpoint_value,
-                thresholds,
-                min_value=min_value,
-                max_value=max_value,
-            )
             self._draw_arc_segment(
                 draw,
-                center_x=self.center_x,
-                center_y=self.center_y,
+                center_x=center_x,
+                center_y=center_y,
                 radius=ring_radius,
-                angle_start=segment_start,
-                angle_end=segment_end,
-                color=segment_color,
-                width=thickness,
-                rounded_caps=False,
+                angle_start=start_angle,
+                angle_end=end_angle,
+                color=track_color,
+                width=scaled_thickness,
+                rounded_caps=rounded_caps,
             )
 
-        if rounded_caps:
-            cap_radius = max(1, thickness // 2)
-            start_color = self.color_from_thresholds(
-                min_value,
-                thresholds,
-                min_value=min_value,
-                max_value=max_value,
-            )
-            end_color = self.color_from_thresholds(
-                clamped_value,
-                thresholds,
-                min_value=min_value,
-                max_value=max_value,
-            )
-            for angle, color in ((start_angle, start_color), (progress_end, end_color)):
-                cap_x, cap_y = self._point_on_circle(self.center_x, self.center_y, ring_radius, angle)
-                draw.ellipse(
-                    [
-                        (cap_x - cap_radius, cap_y - cap_radius),
-                        (cap_x + cap_radius, cap_y + cap_radius),
-                    ],
-                    fill=color,
+            if ratio <= 0:
+                return
+
+            steps = max(int(abs(progress_end - start_angle) * 10), 120)
+            for index in range(steps):
+                segment_start = start_angle + ((progress_end - start_angle) * (index / steps))
+                segment_end = start_angle + ((progress_end - start_angle) * ((index + 1) / steps))
+                midpoint_ratio = (index + 0.5) / steps
+                midpoint_value = min_value + ((clamped_value - min_value) * midpoint_ratio)
+                segment_color = self.color_from_thresholds(
+                    midpoint_value,
+                    thresholds,
+                    min_value=min_value,
+                    max_value=max_value,
+                )
+                self._draw_arc_segment(
+                    draw,
+                    center_x=center_x,
+                    center_y=center_y,
+                    radius=ring_radius,
+                    angle_start=segment_start,
+                    angle_end=segment_end,
+                    color=segment_color,
+                    width=scaled_thickness,
+                    rounded_caps=False,
                 )
 
-        return img
+            if rounded_caps:
+                cap_radius = max(1, scaled_thickness // 2)
+                start_color = self.color_from_thresholds(
+                    min_value,
+                    thresholds,
+                    min_value=min_value,
+                    max_value=max_value,
+                )
+                end_color = self.color_from_thresholds(
+                    clamped_value,
+                    thresholds,
+                    min_value=min_value,
+                    max_value=max_value,
+                )
+                for angle, color in ((start_angle, start_color), (progress_end, end_color)):
+                    cap_x, cap_y = self._point_on_circle(center_x, center_y, ring_radius, angle)
+                    draw.ellipse(
+                        [
+                            (cap_x - cap_radius, cap_y - cap_radius),
+                            (cap_x + cap_radius, cap_y + cap_radius),
+                        ],
+                        fill=color,
+                    )
+
+        return self._render_supersampled(
+            background_color=background_color,
+            draw_callback=draw_gradient_ring,
+            scale=4,
+        )
 
     def render_banded_ring(
         self,
@@ -1068,87 +1103,93 @@ class CircularGauge:
         segment_gap_degrees: float = 0.0,
     ) -> Image.Image:
         """Render a categorical threshold ring with a visible current-value marker."""
-        img = Image.new('RGB', (self.width, self.height), background_color)
-        draw = ImageDraw.Draw(img)
-
         resolved_bands = self._resolve_bands(bands)
         if not resolved_bands:
-            return img
+            return Image.new('RGB', (self.width, self.height), background_color)
 
         start_angle, end_angle = self._normalize_arc_angles(start_angle, end_angle)
         total_sweep = end_angle - start_angle
         segment_sweep = total_sweep / len(resolved_bands)
-        ring_radius = self.outer_radius - max(2, thickness // 2)
 
-        self._draw_arc_segment(
-            draw,
-            center_x=self.center_x,
-            center_y=self.center_y,
-            radius=ring_radius,
-            angle_start=start_angle,
-            angle_end=end_angle,
-            color=track_color,
-            width=thickness,
-            rounded_caps=rounded_caps,
-        )
-
-        for index, band in enumerate(resolved_bands):
-            segment_start = start_angle + (segment_sweep * index)
-            segment_end = segment_start + segment_sweep
-            if len(resolved_bands) > 1:
-                gap = segment_gap_degrees / 2.0
-                if index > 0:
-                    segment_start += gap
-                if index < len(resolved_bands) - 1:
-                    segment_end -= gap
-            if segment_end <= segment_start:
-                continue
+        def draw_banded_ring(draw: ImageDraw.ImageDraw, scale: int) -> None:
+            center_x = self.center_x * scale
+            center_y = self.center_y * scale
+            scaled_thickness = max(1, thickness * scale)
+            ring_radius = (self.outer_radius * scale) - max(2 * scale, scaled_thickness // 2)
 
             self._draw_arc_segment(
                 draw,
-                center_x=self.center_x,
-                center_y=self.center_y,
+                center_x=center_x,
+                center_y=center_y,
                 radius=ring_radius,
-                angle_start=segment_start,
-                angle_end=segment_end,
-                color=band["color"],
-                width=thickness,
-                round_start_cap=rounded_caps and index == 0,
-                round_end_cap=rounded_caps and index == len(resolved_bands) - 1,
+                angle_start=start_angle,
+                angle_end=end_angle,
+                color=track_color,
+                width=scaled_thickness,
+                rounded_caps=rounded_caps,
             )
 
-        if show_marker:
-            marker_angle, active_color = self._marker_angle_for_bands(
-                value,
-                resolved_bands,
-                start_angle=start_angle,
-                end_angle=end_angle,
-            )
-            marker_outline = marker_outline_color or active_color
-            marker_x, marker_y = self._point_on_circle(
-                self.center_x,
-                self.center_y,
-                ring_radius,
-                marker_angle,
-            )
-            outer_radius = max(4, (thickness // 2) + 1)
-            inner_radius = max(2, outer_radius - 2)
-            draw.ellipse(
-                [
-                    (marker_x - outer_radius, marker_y - outer_radius),
-                    (marker_x + outer_radius, marker_y + outer_radius),
-                ],
-                fill=marker_outline,
-            )
-            draw.ellipse(
-                [
-                    (marker_x - inner_radius, marker_y - inner_radius),
-                    (marker_x + inner_radius, marker_y + inner_radius),
-                ],
-                fill=marker_fill_color,
-            )
+            for index, band in enumerate(resolved_bands):
+                segment_start = start_angle + (segment_sweep * index)
+                segment_end = segment_start + segment_sweep
+                if len(resolved_bands) > 1:
+                    gap = segment_gap_degrees / 2.0
+                    if index > 0:
+                        segment_start += gap
+                    if index < len(resolved_bands) - 1:
+                        segment_end -= gap
+                if segment_end <= segment_start:
+                    continue
 
-        return img
+                self._draw_arc_segment(
+                    draw,
+                    center_x=center_x,
+                    center_y=center_y,
+                    radius=ring_radius,
+                    angle_start=segment_start,
+                    angle_end=segment_end,
+                    color=band["color"],
+                    width=scaled_thickness,
+                    round_start_cap=rounded_caps and index == 0,
+                    round_end_cap=rounded_caps and index == len(resolved_bands) - 1,
+                )
+
+            if show_marker:
+                marker_angle, active_color = self._marker_angle_for_bands(
+                    value,
+                    resolved_bands,
+                    start_angle=start_angle,
+                    end_angle=end_angle,
+                )
+                marker_outline = marker_outline_color or active_color
+                marker_x, marker_y = self._point_on_circle(
+                    center_x,
+                    center_y,
+                    ring_radius,
+                    marker_angle,
+                )
+                outer_radius = max(4, (scaled_thickness // 2) + scale)
+                inner_radius = max(2, outer_radius - (2 * scale))
+                draw.ellipse(
+                    [
+                        (marker_x - outer_radius, marker_y - outer_radius),
+                        (marker_x + outer_radius, marker_y + outer_radius),
+                    ],
+                    fill=marker_outline,
+                )
+                draw.ellipse(
+                    [
+                        (marker_x - inner_radius, marker_y - inner_radius),
+                        (marker_x + inner_radius, marker_y + inner_radius),
+                    ],
+                    fill=marker_fill_color,
+                )
+
+        return self._render_supersampled(
+            background_color=background_color,
+            draw_callback=draw_banded_ring,
+            scale=4,
+        )
 
 
 class ProgressBar:
