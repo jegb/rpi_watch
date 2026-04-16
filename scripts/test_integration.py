@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 import logging
 import time
+import yaml
 
 from rpi_watch.display.gc9a01_spi import GC9A01_SPI
 from rpi_watch.display.components import TextRenderer, CircularGauge, ProgressBar, TextSize
@@ -31,6 +32,20 @@ from rpi_watch.utils import setup_logging
 setup_logging('INFO')
 logger = logging.getLogger(__name__)
 
+CONFIG_PATH = Path(__file__).parent.parent / "config" / "config.yaml"
+
+
+def load_metric_font_path() -> str | None:
+    """Load the configured metric font path from config.yaml."""
+    try:
+        with open(CONFIG_PATH, "r") as handle:
+            config = yaml.safe_load(handle) or {}
+    except Exception as exc:
+        logger.warning("Failed to load config for font path: %s", exc)
+        return None
+
+    return config.get("metric_display", {}).get("font_path")
+
 
 class IntegrationTestSuite:
     """Integration tests for complete system."""
@@ -40,6 +55,7 @@ class IntegrationTestSuite:
         self.display = None
         self.metric_store = MetricStore()
         self.results = []
+        self.font_path = load_metric_font_path()
 
     def setup_display(self) -> bool:
         """Set up display for testing."""
@@ -68,7 +84,7 @@ class IntegrationTestSuite:
         logger.info("─" * 70)
 
         try:
-            text_renderer = TextRenderer()
+            text_renderer = TextRenderer(font_path=self.font_path)
 
             # Test all text sizes
             sizes = [TextSize.XL, TextSize.LARGE, TextSize.NORMAL, TextSize.SMALL, TextSize.TINY]
@@ -99,7 +115,7 @@ class IntegrationTestSuite:
         logger.info("─" * 70)
 
         try:
-            gauge = CircularGauge()
+            gauge = CircularGauge(font_path=self.font_path)
             logger.info("  Animating gauge from 0% to 100%")
 
             # Animate gauge from 0 to 100
@@ -137,7 +153,7 @@ class IntegrationTestSuite:
         logger.info("─" * 70)
 
         try:
-            progress = ProgressBar()
+            progress = ProgressBar(font_path=self.font_path)
             logger.info("  Testing linear and circular progress")
 
             progress_values = [0, 25, 50, 75, 100]
@@ -189,7 +205,7 @@ class IntegrationTestSuite:
 
             for layout_name, LayoutClass in layouts_to_test:
                 logger.info(f"  Testing: {layout_name}")
-                layout = LayoutClass(color_scheme=ColorScheme.BRIGHT)
+                layout = LayoutClass(color_scheme=ColorScheme.BRIGHT, font_path=self.font_path)
 
                 # Render based on layout type
                 if layout_name == "Large Metric":
@@ -243,7 +259,7 @@ class IntegrationTestSuite:
 
         try:
             logger.info("  Testing metric updates")
-            renderer = MetricRenderer()
+            renderer = MetricRenderer(font_path=self.font_path)
 
             # Simulate metric updates
             test_values = [10.0, 20.5, 30.0, 25.5, 15.0]
@@ -292,7 +308,7 @@ class IntegrationTestSuite:
 
             for scheme in color_schemes:
                 logger.info(f"  Testing: {scheme.name}")
-                layout = LargeMetricLayout(color_scheme=scheme)
+                layout = LargeMetricLayout(color_scheme=scheme, font_path=self.font_path)
 
                 img = layout.render(
                     value=42.0,
@@ -353,7 +369,7 @@ class IntegrationTestSuite:
                 logger.info(f"  Simulating: {seq['name']}")
 
                 # PM2.5 metric with gauge
-                layout = MetricWithGaugeLayout(color_scheme=ColorScheme.SUNSET)
+                layout = MetricWithGaugeLayout(color_scheme=ColorScheme.SUNSET, font_path=self.font_path)
                 img = layout.render(
                     value=seq["pm_2_5"],
                     min_value=0,
@@ -390,7 +406,7 @@ class IntegrationTestSuite:
             logger.info("  Testing full display refresh cycle")
 
             # Create test image
-            renderer = MetricRenderer()
+            renderer = MetricRenderer(font_path=self.font_path)
             img = renderer.render_metric(99.9, decimal_places=1, unit_label="")
 
             # Measure refresh time

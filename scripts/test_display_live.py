@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 import logging
+import yaml
 from rpi_watch.display.gc9a01_spi import GC9A01_SPI
 from rpi_watch.display.components import TextRenderer, CircularGauge, ProgressBar
 from rpi_watch.display.layouts import (
@@ -25,6 +26,20 @@ from rpi_watch.utils import setup_logging
 
 setup_logging('INFO')
 logger = logging.getLogger(__name__)
+
+CONFIG_PATH = Path(__file__).parent.parent / "config" / "config.yaml"
+
+
+def load_metric_font_path() -> str | None:
+    """Load the configured metric font path from config.yaml."""
+    try:
+        with open(CONFIG_PATH, "r") as handle:
+            config = yaml.safe_load(handle) or {}
+    except Exception as exc:
+        logger.warning("Failed to load config for font path: %s", exc)
+        return None
+
+    return config.get("metric_display", {}).get("font_path")
 
 # Configuration
 DISPLAY_DURATION = 3  # Show each test for 3 seconds
@@ -92,7 +107,7 @@ def test_text_rendering():
 
     from rpi_watch.display.components import TextSize
 
-    renderer = TextRenderer()
+    renderer = TextRenderer(font_path=load_metric_font_path())
 
     tests = [
         ("42.5", TextSize.XL, "Large metric"),
@@ -115,7 +130,7 @@ def test_large_metric_layout():
     logger.info("TEST 2: Large Metric Layout")
     logger.info("=" * 70)
 
-    layout = LargeMetricLayout(color_scheme=ColorScheme.BRIGHT)
+    layout = LargeMetricLayout(color_scheme=ColorScheme.BRIGHT, font_path=load_metric_font_path())
 
     tests = [
         (23.5, "Temperature", "Living Room", "°C"),
@@ -136,7 +151,7 @@ def test_metric_with_gauge():
     logger.info("TEST 3: Metric with Gauge")
     logger.info("=" * 70)
 
-    layout = MetricWithGaugeLayout(color_scheme=ColorScheme.OCEAN)
+    layout = MetricWithGaugeLayout(color_scheme=ColorScheme.OCEAN, font_path=load_metric_font_path())
 
     tests = [
         (25.5, 0, 500, "PM2.5", "µg/m³"),
@@ -159,7 +174,7 @@ def test_multi_ring_gauge():
     logger.info("TEST 4: Multi-Ring Gauge")
     logger.info("=" * 70)
 
-    layout = MultiRingGaugeLayout(color_scheme=ColorScheme.FOREST)
+    layout = MultiRingGaugeLayout(color_scheme=ColorScheme.FOREST, font_path=load_metric_font_path())
 
     tests = [
         ([45.0], ["Temp"]),
@@ -180,7 +195,7 @@ def test_circular_gauge():
     logger.info("TEST 5: Circular Gauge Component")
     logger.info("=" * 70)
 
-    gauge = CircularGauge()
+    gauge = CircularGauge(font_path=load_metric_font_path())
 
     tests = [
         (25.0, "Low reading"),
@@ -207,7 +222,7 @@ def test_progress_indicators():
     logger.info("TEST 6: Progress Indicators")
     logger.info("=" * 70)
 
-    progress = ProgressBar()
+    progress = ProgressBar(font_path=load_metric_font_path())
 
     tests = [
         (25, "25% complete"),
@@ -241,7 +256,7 @@ def test_color_schemes():
     ]
 
     for scheme in schemes:
-        layout = LargeMetricLayout(color_scheme=scheme)
+        layout = LargeMetricLayout(color_scheme=scheme, font_path=load_metric_font_path())
         img = layout.render(value=42.0, title=f"{scheme.name}", detail="Color Scheme", unit="")
         show_image(img, f"Color Scheme: {scheme.name}")
 

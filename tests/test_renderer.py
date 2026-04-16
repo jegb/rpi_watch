@@ -22,8 +22,10 @@ class TestMetricRenderer(unittest.TestCase):
         self.assertEqual(self.renderer.width, 240)
         self.assertEqual(self.renderer.height, 240)
         self.assertEqual(self.renderer.font_size, 80)
+        self.assertGreaterEqual(self.renderer.title_font_size, 24)
         self.assertGreaterEqual(self.renderer.unit_font_size, 24)
         self.assertIsNotNone(self.renderer.font)
+        self.assertIsNotNone(self.renderer.title_font)
         self.assertIsNotNone(self.renderer.unit_font)
         self.assertIsNotNone(self.renderer.circular_mask)
 
@@ -56,7 +58,34 @@ class TestMetricRenderer(unittest.TestCase):
 
     def test_render_metric_with_microgram_unit(self):
         """Test rendering particulate concentration with Unicode unit label."""
-        image = self.renderer.render_metric(23.5, decimal_places=1, unit_label="µg/m³")
+        image = self.renderer.render_metric(
+            23.5,
+            decimal_places=1,
+            title_label="PM2.5",
+            unit_label="µg/m³",
+        )
+        self.assertIsInstance(image, Image.Image)
+        self.assertEqual(image.size, (240, 240))
+
+    def test_render_metric_with_placeholder_text(self):
+        """Test rendering a non-numeric placeholder string."""
+        image = self.renderer.render_metric(
+            "--.-",
+            decimal_places=1,
+            title_label="PM2.5",
+            unit_label="µg/m³",
+        )
+        self.assertIsInstance(image, Image.Image)
+        self.assertEqual(image.size, (240, 240))
+
+    def test_render_metric_with_title_label(self):
+        """Test rendering a metric with both title and unit labels."""
+        image = self.renderer.render_metric(
+            47.8,
+            decimal_places=1,
+            title_label="HUMID",
+            unit_label="%",
+        )
         self.assertIsInstance(image, Image.Image)
         self.assertEqual(image.size, (240, 240))
 

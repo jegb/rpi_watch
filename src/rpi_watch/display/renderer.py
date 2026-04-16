@@ -23,6 +23,7 @@ class MetricRenderer:
         height: int = 240,
         font_path: Optional[str] = None,
         font_size: int = 80,
+        title_font_size: Optional[int] = None,
         unit_font_size: Optional[int] = None,
         text_color: Tuple[int, int, int] = (255, 255, 255),
         background_color: Tuple[int, int, int] = (0, 0, 0),
@@ -44,6 +45,7 @@ class MetricRenderer:
         self.font_path = font_path
         self.font_size = font_size
         self.unit_font_size = unit_font_size or max(24, int(font_size * 0.30))
+        self.title_font_size = title_font_size or self.unit_font_size
         self.text_color = text_color
         self.background_color = background_color
         self.padding = padding
@@ -54,6 +56,7 @@ class MetricRenderer:
 
         # Initialize font
         self.font = self._load_font(font_path, font_size)
+        self.title_font = self._load_font(font_path, self.title_font_size)
         self.unit_font = self._load_font(font_path, self.unit_font_size)
 
         # Pre-compute circular mask once for efficiency
@@ -61,7 +64,8 @@ class MetricRenderer:
 
         logger.info(
             f"MetricRenderer initialized: {width}x{height}, "
-            f"font_size={font_size}, unit_font_size={self.unit_font_size}, "
+            f"font_size={font_size}, title_font_size={self.title_font_size}, "
+            f"unit_font_size={self.unit_font_size}, "
             f"font_path={font_path}, resolved_font={self.resolved_font_source}, "
             f"scalable_font={self.using_scalable_font}"
         )
@@ -132,42 +136,47 @@ class MetricRenderer:
         logger.debug(f"Circular mask created: radius={radius}, center=({center_x}, {center_y})")
         return mask
 
-    def render_metric(
+    def _render_text_block(
         self,
-        value: float,
-        decimal_places: int = 1,
+        display_text: str,
+        title_label: str = "",
         unit_label: str = "",
     ) -> Image.Image:
-        """Render a numeric metric as a PIL Image.
-
-        Args:
-            value: Numeric value to display
-            decimal_places: Number of decimal places to show
-            unit_label: Optional unit string (e.g., "°C", "W")
-
-        Returns:
-            PIL Image (RGB, 240x240) with the metric value centered
-        """
-        # Format the value
-        if decimal_places >= 0:
-            formatted_value = f"{value:.{decimal_places}f}"
-        else:
-            formatted_value = str(int(value))
-
-        # Create base image with background color
+        """Render arbitrary display text with optional title and unit lines."""
         image = Image.new('RGB', (self.width, self.height), self.background_color)
         draw = ImageDraw.Draw(image)
 
         max_text_width = self.width - (self.padding * 2)
         value_font = self._fit_font(
-            formatted_value,
+            display_text,
             self.font_size,
             max_width=max_text_width,
             min_size=max(42, int(self.font_size * 0.60)),
         )
-        value_bbox = draw.textbbox((0, 0), formatted_value, font=value_font)
+        value_bbox = draw.textbbox((0, 0), display_text, font=value_font)
         value_width = value_bbox[2] - value_bbox[0]
         value_height = value_bbox[3] - value_bbox[1]
+
+        lines = []
+
+        if title_label:
+            title_font = self._fit_font(
+                title_label,
+                self.title_font_size,
+                max_width=max_text_width,
+                min_size=max(18, int(self.title_font_size * 0.75)),
+            )
+            title_bbox = draw.textbbox((0, 0), title_label, font=title_font)
+            lines.append(
+                (
+                    title_label,
+                    title_font,
+                    title_bbox[2] - title_bbox[0],
+                    title_bbox[3] - title_bbox[1],
+                )
+            )
+
+        lines.append((display_text, value_font, value_width, value_height))
 
         if unit_label:
             unit_font = self._fit_font(
@@ -177,26 +186,61 @@ class MetricRenderer:
                 min_size=max(18, int(self.unit_font_size * 0.75)),
             )
             unit_bbox = draw.textbbox((0, 0), unit_label, font=unit_font)
-            unit_width = unit_bbox[2] - unit_bbox[0]
-            unit_height = unit_bbox[3] - unit_bbox[1]
+            lines.append(
+                (
+                    unit_label,
+                    unit_font,
+                    unit_bbox[2] - unit_bbox[0],
+                    unit_bbox[3] - unit_bbox[1],
+                )
+            )
 
-            total_height = value_height + self.unit_gap + unit_height
-            group_top = (self.height - total_height) // 2 - 8
+        total_height = sum(line[3] for line in lines)
+        total_height += self.unit_gap * max(0, len(lines) - 1)
+        current_y = (self.height - total_height) // 2 - 8
 
-            value_x = (self.width - value_width) // 2
-            value_y = group_top
-            unit_x = (self.width - unit_width) // 2
-            unit_y = value_y + value_height + self.unit_gap
+        for text, font, text_width, text_height in lines:
+            text_x = (self.width - text_width) // 2
+            draw.text((text_x, current_y), text, fill=self.text_color, font=font)
+            current_y += text_height + self.unit_gap
 
-            draw.text((value_x, value_y), formatted_value, fill=self.text_color, font=value_font)
-            draw.text((unit_x, unit_y), unit_label, fill=self.text_color, font=unit_font)
+        return image
+
+    def render_metric(
+        self,
+        value: float | str,
+        decimal_places: int = 1,
+        title_label: str = "",
+        unit_label: str = "",
+    ) -> Image.Image:
+        """Render a metric as a PIL Image.
+
+        Args:
+            value: Numeric value or placeholder text to display
+            decimal_places: Number of decimal places to show
+            title_label: Optional title string (e.g., "PM2.5", "TEMP")
+            unit_label: Optional unit string (e.g., "°C", "W")
+
+        Returns:
+            PIL Image (RGB, 240x240) with the metric value centered
+        """
+        if isinstance(value, str):
+            formatted_value = value
         else:
-            text_x = (self.width - value_width) // 2
-            text_y = (self.height - value_height) // 2
-            draw.text((text_x, text_y), formatted_value, fill=self.text_color, font=value_font)
+            if decimal_places >= 0:
+                formatted_value = f"{value:.{decimal_places}f}"
+            else:
+                formatted_value = str(int(value))
+
+        image = self._render_text_block(
+            formatted_value,
+            title_label=title_label,
+            unit_label=unit_label,
+        )
 
         logger.debug(
-            f"Rendered metric: value={value}, text='{formatted_value}', unit='{unit_label}'"
+            f"Rendered metric: value={value}, text='{formatted_value}', "
+            f"title='{title_label}', unit='{unit_label}'"
         )
 
         return image
@@ -230,8 +274,9 @@ class MetricRenderer:
 
     def render_and_mask(
         self,
-        value: float,
+        value: float | str,
         decimal_places: int = 1,
+        title_label: str = "",
         unit_label: str = "",
     ) -> Image.Image:
         """Render metric and apply circular mask in one step.
@@ -239,11 +284,17 @@ class MetricRenderer:
         Args:
             value: Numeric value to display
             decimal_places: Number of decimal places to show
+            title_label: Optional title string (e.g., "PM2.5", "TEMP")
             unit_label: Optional unit string (e.g., "°C", "W")
 
         Returns:
             PIL Image (RGB, 240x240) with metric value and circular mask applied
         """
-        image = self.render_metric(value, decimal_places, unit_label)
+        image = self.render_metric(
+            value,
+            decimal_places=decimal_places,
+            title_label=title_label,
+            unit_label=unit_label,
+        )
         masked_image = self.apply_circular_mask(image)
         return masked_image

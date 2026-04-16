@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 import logging
 import time
+import yaml
 
 from rpi_watch.display.layouts import (
     LayoutType,
@@ -31,6 +32,20 @@ from rpi_watch.utils import setup_logging
 setup_logging('INFO')
 logger = logging.getLogger(__name__)
 
+CONFIG_PATH = Path(__file__).parent.parent / "config" / "config.yaml"
+
+
+def load_metric_font_path() -> str | None:
+    """Load the configured metric font path from config.yaml."""
+    try:
+        with open(CONFIG_PATH, "r") as handle:
+            config = yaml.safe_load(handle) or {}
+    except Exception as exc:
+        logger.warning("Failed to load config for font path: %s", exc)
+        return None
+
+    return config.get("metric_display", {}).get("font_path")
+
 
 def demo_large_metric():
     """Demo: Large metric with title and detail."""
@@ -38,7 +53,7 @@ def demo_large_metric():
     logger.info("DEMO 1: Large Metric Layout")
     logger.info("=" * 70)
 
-    layout = LargeMetricLayout(color_scheme=ColorScheme.BRIGHT)
+    layout = LargeMetricLayout(color_scheme=ColorScheme.BRIGHT, font_path=load_metric_font_path())
 
     # Test cases
     test_cases = [
@@ -60,7 +75,7 @@ def demo_metric_with_gauge():
     logger.info("DEMO 2: Metric with Gauge Layout")
     logger.info("=" * 70)
 
-    layout = MetricWithGaugeLayout(color_scheme=ColorScheme.OCEAN)
+    layout = MetricWithGaugeLayout(color_scheme=ColorScheme.OCEAN, font_path=load_metric_font_path())
 
     # Test cases
     test_cases = [
@@ -100,7 +115,7 @@ def demo_multi_ring_gauge():
     logger.info("DEMO 3: Multi-Ring Gauge Layout")
     logger.info("=" * 70)
 
-    layout = MultiRingGaugeLayout(color_scheme=ColorScheme.FOREST)
+    layout = MultiRingGaugeLayout(color_scheme=ColorScheme.FOREST, font_path=load_metric_font_path())
 
     # Test cases with different numbers of rings
     test_cases = [
@@ -139,7 +154,7 @@ def demo_text_over_gauge():
     logger.info("DEMO 4: Text Over Gauge Layout")
     logger.info("=" * 70)
 
-    layout = TextOverGaugeLayout(color_scheme=ColorScheme.SUNSET)
+    layout = TextOverGaugeLayout(color_scheme=ColorScheme.SUNSET, font_path=load_metric_font_path())
 
     # Test cases
     test_cases = [
@@ -161,7 +176,7 @@ def demo_split_metrics():
     logger.info("DEMO 5: Split Metrics Layout")
     logger.info("=" * 70)
 
-    layout = SplitMetricsLayout(color_scheme=ColorScheme.BRIGHT)
+    layout = SplitMetricsLayout(color_scheme=ColorScheme.BRIGHT, font_path=load_metric_font_path())
 
     # Test cases
     test_cases = [
@@ -204,7 +219,7 @@ def demo_radial_dashboard():
     logger.info("DEMO 6: Radial Dashboard Layout")
     logger.info("=" * 70)
 
-    layout = RadialDashboardLayout(color_scheme=ColorScheme.OCEAN)
+    layout = RadialDashboardLayout(color_scheme=ColorScheme.OCEAN, font_path=load_metric_font_path())
 
     # Test cases (triangular arrangement)
     test_cases = [
@@ -247,7 +262,7 @@ def demo_progress_stack():
     logger.info("DEMO 7: Progress Stack Layout")
     logger.info("=" * 70)
 
-    layout = ProgressStackLayout(color_scheme=ColorScheme.FOREST)
+    layout = ProgressStackLayout(color_scheme=ColorScheme.FOREST, font_path=load_metric_font_path())
 
     # Test cases
     test_cases = [
@@ -297,7 +312,7 @@ def demo_color_schemes():
     ]
 
     for scheme in color_schemes:
-        layout = LargeMetricLayout(color_scheme=scheme)
+        layout = LargeMetricLayout(color_scheme=scheme, font_path=load_metric_font_path())
         img = layout.render(
             value=42.0,
             title=f"{scheme.name} Theme",
@@ -327,7 +342,7 @@ def demo_sps_monitor_integration():
 
     # Layout 1: PM2.5 with gauge
     logger.info("\nLayout 1: PM2.5 with Gauge")
-    layout = MetricWithGaugeLayout(color_scheme=ColorScheme.SUNSET)
+    layout = MetricWithGaugeLayout(color_scheme=ColorScheme.SUNSET, font_path=load_metric_font_path())
     img = layout.render(
         value=sps_data["pm_2_5"],
         min_value=0,
@@ -340,7 +355,7 @@ def demo_sps_monitor_integration():
 
     # Layout 2: Temperature and Humidity split
     logger.info("\nLayout 2: Temperature & Humidity")
-    layout = SplitMetricsLayout(color_scheme=ColorScheme.OCEAN)
+    layout = SplitMetricsLayout(color_scheme=ColorScheme.OCEAN, font_path=load_metric_font_path())
     img = layout.render(
         left_value=sps_data["temp"],
         right_value=sps_data["humidity"],
@@ -354,7 +369,7 @@ def demo_sps_monitor_integration():
 
     # Layout 3: Multi-ring gauge (all PM metrics)
     logger.info("\nLayout 3: Multi-Ring PM Gauge")
-    layout = MultiRingGaugeLayout(color_scheme=ColorScheme.FOREST)
+    layout = MultiRingGaugeLayout(color_scheme=ColorScheme.FOREST, font_path=load_metric_font_path())
     img = layout.render(
         values=[sps_data["pm_1_0"], sps_data["pm_2_5"], sps_data["pm_10_0"]],
         labels=["PM1.0", "PM2.5", "PM10"],
@@ -367,7 +382,7 @@ def demo_sps_monitor_integration():
 
     # Layout 4: Radial dashboard
     logger.info("\nLayout 4: Radial Dashboard")
-    layout = RadialDashboardLayout(color_scheme=ColorScheme.BRIGHT)
+    layout = RadialDashboardLayout(color_scheme=ColorScheme.BRIGHT, font_path=load_metric_font_path())
     img = layout.render(
         top_value=sps_data["temp"],
         bottom_left_value=sps_data["humidity"],
@@ -381,7 +396,7 @@ def demo_sps_monitor_integration():
 
     # Layout 5: Progress stack (all metrics)
     logger.info("\nLayout 5: Progress Stack")
-    layout = ProgressStackLayout(color_scheme=ColorScheme.SUNSET)
+    layout = ProgressStackLayout(color_scheme=ColorScheme.SUNSET, font_path=load_metric_font_path())
     metrics = [
         {"value": sps_data["pm_1_0"], "label": "PM1.0", "color": (255, 0, 0)},
         {"value": sps_data["pm_2_5"], "label": "PM2.5", "color": (255, 100, 0)},

@@ -32,12 +32,12 @@ DEFAULT_FIELD_PRIORITY = (
 )
 
 FIELD_DISPLAY_DEFAULTS = {
-    'pm_1_0': {'decimal_places': 1, 'unit_label': 'µg/m³'},
-    'pm_2_5': {'decimal_places': 1, 'unit_label': 'µg/m³'},
-    'pm_4_0': {'decimal_places': 1, 'unit_label': 'µg/m³'},
-    'pm_10_0': {'decimal_places': 1, 'unit_label': 'µg/m³'},
-    'temp': {'decimal_places': 1, 'unit_label': '°C'},
-    'humidity': {'decimal_places': 1, 'unit_label': '%'},
+    'pm_1_0': {'decimal_places': 1, 'title_label': 'PM1.0', 'unit_label': 'µg/m³'},
+    'pm_2_5': {'decimal_places': 1, 'title_label': 'PM2.5', 'unit_label': 'µg/m³'},
+    'pm_4_0': {'decimal_places': 1, 'title_label': 'PM4.0', 'unit_label': 'µg/m³'},
+    'pm_10_0': {'decimal_places': 1, 'title_label': 'PM10', 'unit_label': 'µg/m³'},
+    'temp': {'decimal_places': 1, 'title_label': 'TEMP', 'unit_label': '°C'},
+    'humidity': {'decimal_places': 1, 'title_label': 'HUMID', 'unit_label': '%'},
 }
 
 
@@ -115,6 +115,7 @@ class RPiWatch:
                 height=display_config.get('height', 240),
                 font_path=metric_config.get('font_path'),
                 font_size=metric_config.get('font_size', 80),
+                title_font_size=metric_config.get('title_font_size'),
                 unit_font_size=metric_config.get('unit_font_size'),
                 text_color=tuple(metric_config.get('text_color', [255, 255, 255])),
                 background_color=tuple(metric_config.get('background_color', [0, 0, 0])),
@@ -151,44 +152,77 @@ class RPiWatch:
         mqtt_config = self.config.get('mqtt', {})
         return metric_config.get('metric_key') or mqtt_config.get('json_field')
 
-    def _get_demo_metric(self) -> Optional[dict]:
-        """Return demo metric settings when configured.
-
-        Demo rendering is kept outside MetricStore so a real MQTT value can
-        replace it immediately without pretending the fake value was received.
-        """
+    def _get_display_metadata(self, field_name: Optional[str]) -> dict:
+        """Resolve display labels for a metric field."""
         metric_config = self._get_metric_display_config()
-        demo_value = metric_config.get('demo_value')
+        preferred_field = self._get_preferred_metric_field()
+        field_name = field_name or preferred_field
+        display_defaults = FIELD_DISPLAY_DEFAULTS.get(field_name, {})
+        is_preferred_field = field_name == preferred_field
 
-        if demo_value is None or metric_config.get('show_demo_value', True) is False:
+        if is_preferred_field:
+            title_label = metric_config.get(
+                'title_label',
+                display_defaults.get('title_label', field_name or ''),
+            )
+            unit_label = metric_config.get(
+                'unit_label',
+                display_defaults.get('unit_label', ''),
+            )
+        else:
+            title_label = display_defaults.get(
+                'title_label',
+                metric_config.get('title_label', field_name or ''),
+            )
+            unit_label = display_defaults.get(
+                'unit_label',
+                metric_config.get('unit_label', ''),
+            )
+
+        return {
+            'field': field_name,
+            'title_label': title_label,
+            'unit_label': unit_label,
+            'decimal_places': metric_config.get(
+                'decimal_places',
+                display_defaults.get('decimal_places', 1),
+            ),
+        }
+
+    def _get_placeholder_metric(self) -> Optional[dict]:
+        """Return placeholder display settings when no reading is available."""
+        metric_config = self._get_metric_display_config()
+        placeholder_text = metric_config.get('placeholder_text', '--.-')
+
+        if metric_config.get('show_placeholder', True) is False:
             return None
 
-        try:
-            return {
-                'value': float(demo_value),
-                'decimal_places': metric_config.get(
-                    'demo_decimal_places',
-                    metric_config.get('decimal_places', 1),
-                ),
-                'unit_label': metric_config.get(
-                    'demo_unit_label',
-                    metric_config.get('unit_label', ''),
-                ),
-            }
-        except (TypeError, ValueError):
-            logger.warning(f"Invalid demo_value in config: {demo_value!r}")
-            return None
+        preferred_field = self._get_preferred_metric_field()
+        display_metadata = self._get_display_metadata(preferred_field)
+        return {
+            'text': str(placeholder_text),
+            'title_label': metric_config.get(
+                'placeholder_title_label',
+                display_metadata.get('title_label', ''),
+            ),
+            'unit_label': metric_config.get(
+                'placeholder_unit_label',
+                display_metadata.get('unit_label', ''),
+            ),
+        }
 
     def _display_metric_value(
         self,
-        value: float,
+        value: float | str,
         decimal_places: int,
+        title_label: str,
         unit_label: str,
     ) -> None:
-        """Render and display a numeric metric."""
+        """Render and display a metric or placeholder."""
         image = self.renderer.render_and_mask(
             value,
             decimal_places=decimal_places,
+            title_label=title_label,
             unit_label=unit_label,
         )
         self.display.display(image)
@@ -203,7 +237,6 @@ class RPiWatch:
             return None
 
         preferred_field = self._get_preferred_metric_field()
-        metric_config = self._get_metric_display_config()
 
         field_name = None
         if preferred_field and preferred_field in numeric_payload:
@@ -217,21 +250,14 @@ class RPiWatch:
         if field_name is None:
             field_name = next(iter(numeric_payload))
 
-        display_defaults = FIELD_DISPLAY_DEFAULTS.get(field_name, {})
-        configured_unit_label = metric_config.get('unit_label')
-        if configured_unit_label and field_name == preferred_field:
-            unit_label = configured_unit_label
-        else:
-            unit_label = display_defaults.get('unit_label', configured_unit_label or '')
+        display_metadata = self._get_display_metadata(field_name)
 
         return {
             'field': field_name,
             'value': numeric_payload[field_name],
-            'decimal_places': metric_config.get(
-                'decimal_places',
-                display_defaults.get('decimal_places', 1),
-            ),
-            'unit_label': unit_label,
+            'decimal_places': display_metadata['decimal_places'],
+            'title_label': display_metadata['title_label'],
+            'unit_label': display_metadata['unit_label'],
         }
 
     def run(self) -> None:
@@ -265,7 +291,7 @@ class RPiWatch:
             # Get configuration
             display_config = self.config.get('display', {})
             metric_config = self._get_metric_display_config()
-            demo_metric = self._get_demo_metric()
+            placeholder_metric = self._get_placeholder_metric()
             refresh_rate = display_config.get('refresh_rate_hz', 2)
             frame_time = 1.0 / refresh_rate
 
@@ -285,6 +311,7 @@ class RPiWatch:
                             selected_metric['field'],
                             selected_metric['value'],
                             selected_metric['decimal_places'],
+                            selected_metric['title_label'],
                             selected_metric['unit_label'],
                         )
 
@@ -293,6 +320,7 @@ class RPiWatch:
                             self._display_metric_value(
                                 selected_metric['value'],
                                 decimal_places=selected_metric['decimal_places'],
+                                title_label=selected_metric['title_label'],
                                 unit_label=selected_metric['unit_label'],
                             )
                             last_render_state = render_state
@@ -302,39 +330,43 @@ class RPiWatch:
                                 f"{selected_metric['field']}={selected_metric['value']}"
                             )
                     elif current_value is not None:
+                        display_metadata = self._get_display_metadata(self._get_preferred_metric_field())
                         render_state = (
                             'scalar',
                             current_value,
-                            metric_config.get('decimal_places', 1),
-                            metric_config.get('unit_label', ''),
+                            display_metadata['decimal_places'],
+                            display_metadata['title_label'],
+                            display_metadata['unit_label'],
                         )
 
                         if render_state != last_render_state:
                             self._display_metric_value(
                                 current_value,
-                                decimal_places=metric_config.get('decimal_places', 1),
-                                unit_label=metric_config.get('unit_label', ''),
+                                decimal_places=display_metadata['decimal_places'],
+                                title_label=display_metadata['title_label'],
+                                unit_label=display_metadata['unit_label'],
                             )
                             last_render_state = render_state
                             frame_count += 1
                             logger.debug(f"Display updated (frame {frame_count}): {current_value}")
-                    elif demo_metric is not None:
+                    elif placeholder_metric is not None:
                         render_state = (
-                            'demo',
-                            demo_metric['value'],
-                            demo_metric['decimal_places'],
-                            demo_metric['unit_label'],
+                            'placeholder',
+                            placeholder_metric['text'],
+                            placeholder_metric['title_label'],
+                            placeholder_metric['unit_label'],
                         )
 
                         if render_state != last_render_state:
                             logger.info(
-                                f"Displaying demo metric until first MQTT update: "
-                                f"{demo_metric['value']}"
+                                "Displaying placeholder metric until first MQTT update: %s",
+                                placeholder_metric['text'],
                             )
                             self._display_metric_value(
-                                demo_metric['value'],
-                                decimal_places=demo_metric['decimal_places'],
-                                unit_label=demo_metric['unit_label'],
+                                placeholder_metric['text'],
+                                decimal_places=metric_config.get('decimal_places', 1),
+                                title_label=placeholder_metric['title_label'],
+                                unit_label=placeholder_metric['unit_label'],
                             )
                             last_render_state = render_state
                     else:
@@ -360,10 +392,15 @@ class RPiWatch:
     def _display_waiting(self) -> None:
         """Display a "waiting" message on the screen."""
         try:
+            placeholder_metric = self._get_placeholder_metric() or {}
             image = self.renderer.render_and_mask(
-                0,
-                decimal_places=0,
-                unit_label="..."
+                "--.-",
+                decimal_places=1,
+                title_label=placeholder_metric.get('title_label', ''),
+                unit_label=placeholder_metric.get(
+                    'unit_label',
+                    self._get_metric_display_config().get('unit_label', ''),
+                ),
             )
             self.display.display(image)
         except Exception as e:

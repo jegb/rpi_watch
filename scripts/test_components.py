@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 import logging
+import yaml
 from PIL import Image, ImageDraw
 
 from rpi_watch.display.renderer import MetricRenderer
@@ -26,6 +27,20 @@ from rpi_watch.utils import setup_logging
 setup_logging('INFO')
 logger = logging.getLogger(__name__)
 
+CONFIG_PATH = Path(__file__).parent.parent / "config" / "config.yaml"
+
+
+def load_metric_font_path() -> str | None:
+    """Load the configured metric font path from config.yaml."""
+    try:
+        with open(CONFIG_PATH, "r") as handle:
+            config = yaml.safe_load(handle) or {}
+    except Exception as exc:
+        logger.warning("Failed to load config for font path: %s", exc)
+        return None
+
+    return config.get("metric_display", {}).get("font_path")
+
 
 def save_test_image(image: Image.Image, filename: str):
     """Save test image to file."""
@@ -39,7 +54,14 @@ def test_metric_renderer():
     logger.info("TEST 0: Metric Renderer Font Diagnostics")
     logger.info("=" * 70)
 
-    renderer = MetricRenderer(width=240, height=240, font_size=116, unit_font_size=30)
+    font_path = load_metric_font_path()
+    renderer = MetricRenderer(
+        width=240,
+        height=240,
+        font_path=font_path,
+        font_size=116,
+        unit_font_size=30,
+    )
     logger.info(
         "MetricRenderer font: resolved=%s scalable=%s",
         renderer.resolved_font_source,
@@ -47,15 +69,16 @@ def test_metric_renderer():
     )
 
     samples = [
-        (10.5, 1, "µg/m³", "/tmp/test_metric_pm25.png"),
-        (27.1, 1, "°C", "/tmp/test_metric_temp.png"),
-        (47.8, 1, "%", "/tmp/test_metric_humidity.png"),
+        (10.5, 1, "PM2.5", "µg/m³", "/tmp/test_metric_pm25.png"),
+        (27.1, 1, "TEMP", "°C", "/tmp/test_metric_temp.png"),
+        (47.8, 1, "HUMID", "%", "/tmp/test_metric_humidity.png"),
     ]
 
-    for value, decimal_places, unit_label, filename in samples:
+    for value, decimal_places, title_label, unit_label, filename in samples:
         image = renderer.render_and_mask(
             value=value,
             decimal_places=decimal_places,
+            title_label=title_label,
             unit_label=unit_label,
         )
         save_test_image(image, filename)
@@ -69,7 +92,7 @@ def test_text_rendering():
     logger.info("TEST 1: Text Rendering")
     logger.info("=" * 70)
 
-    renderer = TextRenderer(width=240, height=240)
+    renderer = TextRenderer(width=240, height=240, font_path=load_metric_font_path())
     logger.info("TextRenderer font: resolved=%s", renderer.resolved_font_source)
 
     # Test different sizes
@@ -94,7 +117,7 @@ def test_multiline_text():
     logger.info("TEST 2: Multi-line Text Rendering")
     logger.info("=" * 70)
 
-    renderer = TextRenderer(width=240, height=240)
+    renderer = TextRenderer(width=240, height=240, font_path=load_metric_font_path())
 
     # Test multiline with all levels
     img = renderer.render_multiline(
@@ -125,7 +148,12 @@ def test_circular_gauge():
     logger.info("TEST 3: Circular Gauge Rendering")
     logger.info("=" * 70)
 
-    gauge = CircularGauge(width=240, height=240, outer_radius=100)
+    gauge = CircularGauge(
+        width=240,
+        height=240,
+        outer_radius=100,
+        font_path=load_metric_font_path(),
+    )
 
     # Test different values
     test_values = [0.0, 25.0, 50.0, 75.0, 100.0]
@@ -150,7 +178,12 @@ def test_multi_ring_gauge():
     logger.info("TEST 4: Multi-Ring Gauge")
     logger.info("=" * 70)
 
-    gauge = CircularGauge(width=240, height=240, outer_radius=110)
+    gauge = CircularGauge(
+        width=240,
+        height=240,
+        outer_radius=110,
+        font_path=load_metric_font_path(),
+    )
 
     # Test with different number of rings
     test_cases = [
@@ -178,7 +211,7 @@ def test_linear_progress():
     logger.info("TEST 5: Linear Progress Bar")
     logger.info("=" * 70)
 
-    progress = ProgressBar(width=240, height=240)
+    progress = ProgressBar(width=240, height=240, font_path=load_metric_font_path())
 
     # Test different progress levels
     progress_values = [0, 25, 50, 75, 100]
@@ -202,7 +235,7 @@ def test_circular_progress():
     logger.info("TEST 6: Circular Progress Indicator")
     logger.info("=" * 70)
 
-    progress = ProgressBar(width=240, height=240)
+    progress = ProgressBar(width=240, height=240, font_path=load_metric_font_path())
 
     # Test different progress levels
     progress_values = [0, 25, 50, 75, 100]
@@ -229,8 +262,8 @@ def test_combined_layouts():
 
     # Layout 1: Main metric with gauge
     logger.info("Creating layout: Main metric + gauge...")
-    text_renderer = TextRenderer()
-    gauge = CircularGauge(outer_radius=90)
+    text_renderer = TextRenderer(font_path=load_metric_font_path())
+    gauge = CircularGauge(outer_radius=90, font_path=load_metric_font_path())
 
     # Create base image with metric
     text_img = text_renderer.render_multiline(
@@ -261,7 +294,7 @@ def test_color_variations():
     logger.info("TEST 8: Color Variations")
     logger.info("=" * 70)
 
-    renderer = TextRenderer()
+    renderer = TextRenderer(font_path=load_metric_font_path())
 
     color_schemes = [
         ("Green", (0, 255, 0)),
