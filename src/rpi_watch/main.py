@@ -120,6 +120,7 @@ class RPiWatch:
                 text_color=tuple(metric_config.get('text_color', [255, 255, 255])),
                 background_color=tuple(metric_config.get('background_color', [0, 0, 0])),
                 padding=metric_config.get('padding', 18),
+                title_gap=metric_config.get('title_gap', 10),
                 unit_gap=metric_config.get('unit_gap', 6),
             )
 

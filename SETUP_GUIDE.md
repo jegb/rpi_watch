@@ -1,6 +1,6 @@
 # RPi Watch - Complete Setup Guide
 
-**Last Updated**: April 15, 2026
+**Last Updated**: April 16, 2026
 **Target Hardware**: Raspberry Pi 3/4/5 + GC9A01 Display
 **Estimated Setup Time**: 30-45 minutes
 
@@ -111,6 +111,8 @@ sudo apt-get install -y \
   python3-pip \
   i2c-tools \
   libjpeg-dev \
+  fonts-dejavu-core \
+  fontconfig \
   git
 
 # Optional: Pillow dependencies (may fail on newer OS - skip if not needed)
@@ -122,6 +124,10 @@ sudo apt-get install -y \
 
 # Verify Python version (should be 3.9+)
 python3 --version
+
+# Verify the default renderer font exists
+ls /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+fc-match "DejaVu Sans:style=Bold"
 ```
 
 ### Step 4: Give User GPIO Permissions (Optional)
@@ -199,6 +205,12 @@ paho-mqtt          2.1.0 (or later)
 RPi.GPIO           0.7.0 (or later)
 spidev             3.5 (or later)
 PyYAML             6.0 (or later)
+```
+
+The default display config expects a scalable font at:
+
+```bash
+/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
 ```
 
 ### Step 4: (Optional) Install Project in Development Mode

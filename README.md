@@ -36,6 +36,12 @@ sudo bash scripts/setup_i2c.sh
 sudo reboot
 ```
 
+The renderer expects a scalable system font. The setup script installs the default font packages used by `config/config.yaml`:
+
+```bash
+sudo apt-get install -y fonts-dejavu-core fontconfig
+```
+
 ### 2. Verify I2C Hardware
 
 After reboot, verify your display is detected:
@@ -63,6 +69,13 @@ source venv/bin/activate
 
 # Install Python dependencies
 pip install -r requirements.txt
+```
+
+Verify the default renderer font exists:
+
+```bash
+ls /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+fc-match "DejaVu Sans:style=Bold"
 ```
 
 ### 4. Configuration
@@ -238,6 +251,17 @@ Display shows pixels but no readable text
 2. Check `font_path` points to valid TrueType font
 3. Verify color settings (text/background contrast)
 4. Try test script: `python3 scripts/test_display_init.py`
+
+### Text Is Tiny Or Uses Placeholder Glyphs
+```
+WARNING - No scalable font source could be loaded
+```
+
+**Solution:**
+1. Install the renderer font packages: `sudo apt-get install -y fonts-dejavu-core fontconfig`
+2. Verify the default font path exists: `ls /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`
+3. Check fontconfig can resolve it: `fc-match "DejaVu Sans:style=Bold"`
+4. If you use a custom font, update `metric_display.font_path` in `config/config.yaml`
 
 ## Running as a Service (Optional)
 

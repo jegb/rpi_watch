@@ -24,6 +24,8 @@ class TestMetricRenderer(unittest.TestCase):
         self.assertEqual(self.renderer.font_size, 80)
         self.assertGreaterEqual(self.renderer.title_font_size, 24)
         self.assertGreaterEqual(self.renderer.unit_font_size, 24)
+        self.assertEqual(self.renderer.title_gap, 10)
+        self.assertEqual(self.renderer.unit_gap, 6)
         self.assertIsNotNone(self.renderer.font)
         self.assertIsNotNone(self.renderer.title_font)
         self.assertIsNotNone(self.renderer.unit_font)
@@ -145,6 +147,8 @@ class TestMetricRenderer(unittest.TestCase):
             width=240, height=240,
             font_size=96,
             unit_font_size=28,
+            title_gap=14,
+            unit_gap=12,
             text_color=(0, 255, 0),  # Green
             background_color=(0, 0, 255)  # Blue
         )
@@ -153,6 +157,8 @@ class TestMetricRenderer(unittest.TestCase):
         self.assertIsInstance(image, Image.Image)
         self.assertEqual(image.mode, 'RGB')
         self.assertEqual(renderer.unit_font_size, 28)
+        self.assertEqual(renderer.title_gap, 14)
+        self.assertEqual(renderer.unit_gap, 12)
 
     def test_mask_is_circular(self):
         """Test that mask creates approximately circular shape."""

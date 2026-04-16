@@ -33,6 +33,8 @@ apt-get install -y \
     python3-pip \
     i2c-tools \
     libjpeg-dev \
+    fonts-dejavu-core \
+    fontconfig \
     libharfbuzz0b \
     libwebp6 \
     libtiff5 \
@@ -73,6 +75,8 @@ echo "1. Reboot your Raspberry Pi: sudo reboot"
 echo "2. After reboot, test I2C detection:"
 echo "   i2cdetect -y 1"
 echo "3. Look for your display address (commonly 0x3C or 0x3D)"
+echo "4. Verify the renderer font is available:"
+echo "   ls /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 echo ""
 echo "Then test the application:"
 echo "cd ~/rpi_watch"

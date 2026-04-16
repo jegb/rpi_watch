@@ -28,6 +28,7 @@ class MetricRenderer:
         text_color: Tuple[int, int, int] = (255, 255, 255),
         background_color: Tuple[int, int, int] = (0, 0, 0),
         padding: int = 18,
+        title_gap: int = 10,
         unit_gap: int = 6,
     ):
         """Initialize the renderer.
@@ -49,6 +50,7 @@ class MetricRenderer:
         self.text_color = text_color
         self.background_color = background_color
         self.padding = padding
+        self.title_gap = title_gap
         self.unit_gap = unit_gap
         self._font_cache = {}
         self.resolved_font_source = None
@@ -66,6 +68,7 @@ class MetricRenderer:
             f"MetricRenderer initialized: {width}x{height}, "
             f"font_size={font_size}, title_font_size={self.title_font_size}, "
             f"unit_font_size={self.unit_font_size}, "
+            f"title_gap={self.title_gap}, unit_gap={self.unit_gap}, "
             f"font_path={font_path}, resolved_font={self.resolved_font_source}, "
             f"scalable_font={self.using_scalable_font}"
         )
@@ -168,15 +171,26 @@ class MetricRenderer:
             )
             title_bbox = draw.textbbox((0, 0), title_label, font=title_font)
             lines.append(
-                (
-                    title_label,
-                    title_font,
-                    title_bbox[2] - title_bbox[0],
-                    title_bbox[3] - title_bbox[1],
-                )
+                {
+                    "text": title_label,
+                    "font": title_font,
+                    "width": title_bbox[2] - title_bbox[0],
+                    "height": title_bbox[3] - title_bbox[1],
+                    "top": title_bbox[1],
+                    "gap_after": self.title_gap,
+                }
             )
 
-        lines.append((display_text, value_font, value_width, value_height))
+        lines.append(
+            {
+                "text": display_text,
+                "font": value_font,
+                "width": value_width,
+                "height": value_height,
+                "top": value_bbox[1],
+                "gap_after": self.unit_gap if unit_label else 0,
+            }
+        )
 
         if unit_label:
             unit_font = self._fit_font(
@@ -187,22 +201,29 @@ class MetricRenderer:
             )
             unit_bbox = draw.textbbox((0, 0), unit_label, font=unit_font)
             lines.append(
-                (
-                    unit_label,
-                    unit_font,
-                    unit_bbox[2] - unit_bbox[0],
-                    unit_bbox[3] - unit_bbox[1],
-                )
+                {
+                    "text": unit_label,
+                    "font": unit_font,
+                    "width": unit_bbox[2] - unit_bbox[0],
+                    "height": unit_bbox[3] - unit_bbox[1],
+                    "top": unit_bbox[1],
+                    "gap_after": 0,
+                }
             )
 
-        total_height = sum(line[3] for line in lines)
-        total_height += self.unit_gap * max(0, len(lines) - 1)
-        current_y = (self.height - total_height) // 2 - 8
+        total_height = sum(line["height"] + line["gap_after"] for line in lines)
+        current_y = (self.height - total_height) // 2
 
-        for text, font, text_width, text_height in lines:
-            text_x = (self.width - text_width) // 2
-            draw.text((text_x, current_y), text, fill=self.text_color, font=font)
-            current_y += text_height + self.unit_gap
+        for line in lines:
+            text_x = (self.width - line["width"]) // 2
+            draw_y = current_y - line["top"]
+            draw.text(
+                (text_x, draw_y),
+                line["text"],
+                fill=self.text_color,
+                font=line["font"],
+            )
+            current_y += line["height"] + line["gap_after"]
 
         return image
 

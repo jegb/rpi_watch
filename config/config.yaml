@@ -29,13 +29,14 @@ metric_display:
   metric_key: "pm_2_5"           # Preferred field to render from a multi-metric MQTT payload
   title_label: "PM2.5"           # Small label above the large value
   decimal_places: 1
-  font_size: 116             # Large centered numeric display; renderer auto-fits wider values
+  font_size: 108             # Large centered numeric display; slightly reduced to leave more breathing room
   title_font_size: 30        # Title label above the main value
   unit_font_size: 30         # Separate unit label below the number
   font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
   unit_label: "µg/m³"        # PM2.5 concentration in micrograms per cubic meter
   padding: 18                # Horizontal margin used by font auto-fit
-  unit_gap: 6                # Vertical gap between number and unit line
+  title_gap: 12              # Vertical gap between the title line and the main value
+  unit_gap: 10               # Vertical gap between the main value and the unit line
   show_placeholder: true     # Show a placeholder until the first MQTT value arrives
   placeholder_text: "--.-"   # Placeholder metric when MQTT is offline or no reading has arrived yet
   placeholder_title_label: "PM2.5"

@@ -106,6 +106,8 @@ configure_system() {
         "git"
         "i2c-tools"
         "libjpeg-dev"
+        "fonts-dejavu-core"
+        "fontconfig"
     )
 
     for pkg in "${PACKAGES[@]}"; do
@@ -125,6 +127,13 @@ configure_system() {
         libwebp6 \
         libtiff5 \
         libopenjp2-7 2>&1 | tee -a "$LOG_FILE" > /dev/null || warn "Some optional packages failed - this is OK"
+
+    log "Verifying renderer font availability..."
+    if [ -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf ]; then
+        success "Renderer font found: /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    else
+        warn "Renderer font not found. Install with: sudo apt-get install fonts-dejavu-core fontconfig"
+    fi
 
     success "System configuration complete"
 }
