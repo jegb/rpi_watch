@@ -5,7 +5,7 @@ Provides common layout patterns combining text, gauges, and progress indicators.
 
 import logging
 import math
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Sequence
 from enum import Enum
 
 from PIL import Image, ImageDraw
@@ -667,6 +667,27 @@ class PMBarsLayout(DisplayLayout):
             fill=fill_color,
         )
 
+    @staticmethod
+    def _resolve_scale_max(
+        values: Sequence[float],
+        *,
+        explicit_max: Optional[float],
+        auto_scale_floor: float,
+        padding_ratio: float = 0.18,
+        padding_min: float = 4.0,
+    ) -> float:
+        """Return a common comparison scale with a small contrast pad above the max reading."""
+        if explicit_max is not None:
+            try:
+                numeric_explicit = float(explicit_max)
+            except (TypeError, ValueError):
+                numeric_explicit = 0.0
+            return max(1.0, numeric_explicit)
+
+        max_reading = max([0.0, *values])
+        padded_max = max_reading + max(padding_min, max_reading * padding_ratio)
+        return max(1.0, float(auto_scale_floor), padded_max)
+
     def render(
         self,
         payload: Dict[str, Any],
@@ -679,6 +700,7 @@ class PMBarsLayout(DisplayLayout):
         auto_scale_floor: float = 25.0,
         orientation: str = "horizontal",
         bar_gap: int = 6,
+        scale_padding_ratio: float = 0.18,
     ) -> Image.Image:
         """Render four PM bars from the current payload."""
         img = Image.new('RGB', (self.width, self.height), self.bg_color)
@@ -700,22 +722,27 @@ class PMBarsLayout(DisplayLayout):
             except (TypeError, ValueError):
                 values.append(0.0)
 
-        scale_max = max_value or max(auto_scale_floor, max(values or [auto_scale_floor]))
+        scale_max = self._resolve_scale_max(
+            values,
+            explicit_max=max_value,
+            auto_scale_floor=auto_scale_floor,
+            padding_ratio=scale_padding_ratio,
+        )
         colors = {**self.DEFAULT_COLORS, **(metric_colors or {})}
         orientation = str(orientation).lower()
         gap = max(2, int(bar_gap))
 
-        header_top = 14
-        header_height = 22
-        footer_height = 16
+        header_top = 12
+        header_height = 20
+        footer_height = 14
         content_top = header_top + header_height + 10
         content_bottom = self.height - footer_height - 18
 
         title_font, title_bbox = self.text_renderer.fit_font(
             title,
-            22,
+            20,
             max_width=self.width - 32,
-            min_size=16,
+            min_size=14,
             max_height=header_height,
         )
         title_width = title_bbox[2] - title_bbox[0]
@@ -814,33 +841,44 @@ class PMBarsLayout(DisplayLayout):
                     )
         else:
             row_count = max(1, len(normalized_fields))
-            row_height = max(20, int((content_bottom - content_top - (gap * (row_count - 1))) / row_count))
-            bar_height = max(10, row_height - 8)
+            row_height = max(18, int((content_bottom - content_top - (gap * (row_count - 1))) / row_count))
+            bar_height = max(9, row_height - 10)
             bar_radius = max(4, bar_height // 2)
 
+            row_positions = [content_top + (index * (row_height + gap)) for index in range(row_count)]
+            safe_bounds = [
+                self._safe_horizontal_bounds(row_y, row_y + row_height, inset=10)
+                for row_y in row_positions
+            ]
+            common_inner_left = max(max(16, safe_left + 2) for safe_left, _ in safe_bounds)
+            common_inner_right = min(min(self.width - 16, safe_right - 2) for _, safe_right in safe_bounds)
+
+            if common_inner_right - common_inner_left < 90:
+                fallback_left = min(max(16, safe_left + 2) for safe_left, _ in safe_bounds)
+                fallback_right = max(min(self.width - 16, safe_right - 2) for _, safe_right in safe_bounds)
+                common_inner_left = fallback_left
+                common_inner_right = fallback_right
+
+            available_width = max(90, common_inner_right - common_inner_left)
+            label_width = min(52, max(40, int(available_width * 0.22)))
+            value_width = min(46, max(34, int(available_width * 0.16)))
+            bar_left = common_inner_left + label_width + 6
+            bar_right = common_inner_right - value_width - 6
+            bar_width = max(24, bar_right - bar_left)
+
             for index, ((field_name, label), value) in enumerate(zip(normalized_fields, values)):
-                row_y = content_top + (index * (row_height + gap))
+                row_y = row_positions[index]
                 bar_y = row_y + ((row_height - bar_height) // 2)
                 row_color = colors.get(field_name, self.color_scheme["accent"])
-                safe_left, safe_right = self._safe_horizontal_bounds(row_y, row_y + row_height, inset=10)
-                inner_left = max(16, safe_left + 2)
-                inner_right = min(self.width - 16, safe_right - 2)
-                available_width = max(90, inner_right - inner_left)
-                label_width = min(56, max(44, int(available_width * 0.25)))
-                value_width = min(48, max(36, int(available_width * 0.18)))
-                bar_left = inner_left + label_width + 6
-                bar_right = inner_right - value_width - 6
-                bar_width = max(24, bar_right - bar_left)
 
                 label_font, label_bbox = self.text_renderer.fit_font(
                     label,
-                    18,
+                    16,
                     max_width=label_width,
-                    min_size=11,
+                    min_size=10,
                     max_height=row_height,
                 )
-                label_width_actual = label_bbox[2] - label_bbox[0]
-                label_x = inner_left + max(0, (label_width - label_width_actual) // 2)
+                label_x = common_inner_left
                 draw.text(
                     (label_x, row_y - label_bbox[1]),
                     label,
@@ -851,13 +889,13 @@ class PMBarsLayout(DisplayLayout):
                 value_text = f"{value:.1f}"
                 value_font, value_bbox = self.text_renderer.fit_font(
                     value_text,
-                    18,
+                    16,
                     max_width=value_width,
-                    min_size=11,
+                    min_size=10,
                     max_height=row_height,
                 )
                 value_width_actual = value_bbox[2] - value_bbox[0]
-                value_x = inner_right - value_width_actual
+                value_x = common_inner_right - value_width_actual
                 draw.text(
                     (value_x, row_y - value_bbox[1]),
                     value_text,
