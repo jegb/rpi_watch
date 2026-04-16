@@ -477,6 +477,11 @@ class RPiWatch:
     ) -> None:
         """Render and display a metric or placeholder."""
         metric_config = self._get_metric_display_config()
+        if sparkline_reference_value is not None:
+            sparkline_reference_color = self._coerce_color(
+                metric_config.get('sparkline_reference_color'),
+                (255, 255, 255),
+            )
         image = self.renderer.render_and_mask(
             value,
             decimal_places=decimal_places,

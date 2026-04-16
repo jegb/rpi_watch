@@ -750,11 +750,11 @@ class PMBarsLayout(DisplayLayout):
         orientation = str(orientation).lower()
         gap = max(2, int(bar_gap))
 
-        header_top = 10
+        header_top = 18
         header_height = 18
         footer_height = 14
-        content_top = header_top + header_height + 10
-        content_bottom = self.height - footer_height - 18
+        content_top = header_top + header_height + 8
+        content_bottom = self.height - footer_height - 8
 
         title_font, title_bbox = self.text_renderer.fit_font(
             title,
@@ -773,10 +773,10 @@ class PMBarsLayout(DisplayLayout):
 
         if orientation == "vertical":
             column_count = max(1, len(normalized_fields))
-            content_left = 30
-            content_right = self.width - 30
+            content_left = 34
+            content_right = self.width - 34
             column_width = max(
-                20,
+                16,
                 int((content_right - content_left - (gap * (column_count - 1))) / column_count),
             )
             total_width = (column_width * column_count) + (gap * (column_count - 1))
@@ -858,15 +858,15 @@ class PMBarsLayout(DisplayLayout):
                 )
 
             common_value_y = common_safe_top
-            axis_y = self.height - 4 - axis_height
-            unit_y = axis_y - 2 - unit_height
-            label_y_target = unit_y - 3 - max_label_height
+            axis_y = self.height - 2 - axis_height
+            unit_y = axis_y - 1 - unit_height
+            label_y_target = unit_y - 2 - max_label_height
             common_label_y = min(common_safe_bottom - max_label_height, label_y_target)
-            bar_top = common_value_y + max_value_height + 4
-            bar_bottom = common_label_y - 4
-            if bar_bottom - bar_top < 26:
-                bar_top = common_value_y + max_value_height + 3
-                bar_bottom = max(bar_top + 26, common_label_y - 3)
+            bar_top = common_value_y + max_value_height + 3
+            bar_bottom = common_label_y - 2
+            if bar_bottom - bar_top < 34:
+                bar_top = common_value_y + max_value_height + 2
+                bar_bottom = max(bar_top + 34, common_label_y - 2)
 
             for column in columns:
                 field_name = column["field_name"]
@@ -877,7 +877,7 @@ class PMBarsLayout(DisplayLayout):
                 row_color = colors.get(field_name, self.color_scheme["accent"])
                 if bar_bottom <= bar_top:
                     continue
-                bar_inner_padding = max(3, column_width // 9)
+                bar_inner_padding = max(2, column_width // 10)
                 bar_left = column_left + bar_inner_padding
                 bar_right = column_right - bar_inner_padding
                 bar_radius = max(4, min((bar_right - bar_left) // 2, 10))
@@ -935,7 +935,7 @@ class PMBarsLayout(DisplayLayout):
                                     (line_right, reference_y),
                                 ],
                                 fill=self.color_scheme["secondary"],
-                                width=2,
+                                width=3,
                             )
             draw.text(
                 ((self.width - unit_width) // 2, unit_y - unit_bbox[1]),
@@ -1096,10 +1096,12 @@ class MetricRingLayout(DisplayLayout):
                 background_color=self.bg_color,
                 track_color=track,
                 rounded_caps=rounded_caps,
-                show_marker=show_marker and average_reference_value is not None,
-                marker_fill_color=reference_color,
-                marker_value=average_reference_value,
-                marker_style="diamond",
+                show_marker=show_marker,
+                marker_fill_color=(255, 255, 255),
+                marker_style="pointer",
+                reference_marker_value=average_reference_value,
+                reference_marker_fill_color=reference_color,
+                reference_marker_style="diamond",
             )
         else:
             img = self.gauge.render_gradient_ring(
@@ -1113,10 +1115,12 @@ class MetricRingLayout(DisplayLayout):
                 background_color=self.bg_color,
                 track_color=track,
                 rounded_caps=rounded_caps,
-                show_marker=show_marker and average_reference_value is not None,
-                marker_fill_color=reference_color,
-                marker_value=average_reference_value,
-                marker_style="diamond",
+                show_marker=show_marker,
+                marker_fill_color=(255, 255, 255),
+                marker_style="pointer",
+                reference_marker_value=average_reference_value,
+                reference_marker_fill_color=reference_color,
+                reference_marker_style="diamond",
             )
         draw = ImageDraw.Draw(img)
 

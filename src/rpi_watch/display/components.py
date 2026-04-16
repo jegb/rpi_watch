@@ -294,6 +294,25 @@ class SparklineRenderer:
         img = Image.new('RGB', (self.width, self.height), background_color)
         draw = ImageDraw.Draw(img)
 
+        def draw_dotted_reference_line(y: float, color: Tuple[int, int, int], width: int) -> None:
+            """Draw a light dotted horizontal reference line."""
+            start_x = self.padding
+            end_x = self.width - self.padding
+            dash_length = 4
+            gap_length = 3
+            current_x = start_x
+            while current_x < end_x:
+                segment_end = min(end_x, current_x + dash_length)
+                draw.line(
+                    [
+                        (current_x, y),
+                        (segment_end, y),
+                    ],
+                    fill=color,
+                    width=width,
+                )
+                current_x += dash_length + gap_length
+
         values = self._normalize_values(series)
         if not values:
             return img
@@ -341,17 +360,6 @@ class SparklineRenderer:
             y = value_to_y(value)
             points.append((x, y))
 
-        if reference_numeric is not None:
-            reference_y = value_to_y(reference_numeric)
-            draw.line(
-                [
-                    (self.padding, reference_y),
-                    (self.width - self.padding, reference_y),
-                ],
-                fill=reference_color or line_color,
-                width=max(1, int(reference_width)),
-            )
-
         if fill_color and len(points) >= 2:
             polygon = [(points[0][0], base_y)] + points + [(points[-1][0], base_y)]
             draw.polygon(polygon, fill=fill_color)
@@ -381,6 +389,14 @@ class SparklineRenderer:
                     (x + max(1, radius - 1), y + max(1, radius - 1)),
                 ],
                 fill=marker_inner_color,
+            )
+
+        if reference_numeric is not None:
+            reference_y = value_to_y(reference_numeric)
+            draw_dotted_reference_line(
+                reference_y,
+                reference_color or (255, 255, 255),
+                max(1, int(reference_width)),
             )
 
         return img
@@ -931,9 +947,9 @@ class CircularGauge:
     ) -> None:
         """Draw a subtle pointer marker: inner triangle plus outward hairline."""
         ring_width = max(1.0, outer_radius - inner_radius)
-        triangle_length = max(6.0 * scale, ring_width * 0.8)
-        triangle_half_width = max(3.0 * scale, triangle_length * 0.42)
-        line_width = max(1, scale)
+        triangle_length = max(4.0 * scale, ring_width * 0.56)
+        triangle_half_width = max(2.0 * scale, triangle_length * 0.34)
+        line_width = max(1, int(scale * 0.75))
 
         angle_rad = math.radians(angle)
         perp_rad = angle_rad + (math.pi / 2.0)
@@ -1131,6 +1147,10 @@ class CircularGauge:
         marker_outline_color: Optional[Tuple[int, int, int]] = None,
         marker_value: Optional[float] = None,
         marker_style: str = "pointer",
+        reference_marker_value: Optional[float] = None,
+        reference_marker_fill_color: Optional[Tuple[int, int, int]] = None,
+        reference_marker_outline_color: Optional[Tuple[int, int, int]] = None,
+        reference_marker_style: str = "diamond",
     ) -> Image.Image:
         """Render a configurable progress ring using threshold-based gradient colors."""
         start_angle, end_angle = self._normalize_arc_angles(start_angle, end_angle)
@@ -1141,6 +1161,11 @@ class CircularGauge:
         marker_numeric = clamped_value if marker_value is None else self._clamp(marker_value, min_value, max_value)
         marker_ratio = 0.0 if max_value == min_value else (marker_numeric - min_value) / (max_value - min_value)
         marker_angle = start_angle + (sweep * marker_ratio)
+        reference_marker_angle = None
+        if reference_marker_value is not None:
+            reference_numeric = self._clamp(reference_marker_value, min_value, max_value)
+            reference_ratio = 0.0 if max_value == min_value else (reference_numeric - min_value) / (max_value - min_value)
+            reference_marker_angle = start_angle + (sweep * reference_ratio)
 
         def draw_gradient_ring(draw: ImageDraw.ImageDraw, scale: int) -> None:
             center_x = self.center_x * scale
@@ -1185,6 +1210,30 @@ class CircularGauge:
                             angle=marker_angle,
                             fill_color=marker_fill_color,
                             line_color=marker_color,
+                            scale=scale,
+                        )
+                if reference_marker_angle is not None:
+                    if str(reference_marker_style).lower() == "diamond":
+                        self._draw_ring_diamond_marker(
+                            draw,
+                            center_x=center_x,
+                            center_y=center_y,
+                            radius=ring_radius,
+                            angle=reference_marker_angle,
+                            fill_color=reference_marker_fill_color or marker_fill_color,
+                            scale=scale,
+                        )
+                    else:
+                        ref_color = reference_marker_outline_color or reference_marker_fill_color or marker_fill_color
+                        self._draw_ring_pointer_marker(
+                            draw,
+                            center_x=center_x,
+                            center_y=center_y,
+                            inner_radius=inner_radius,
+                            outer_radius=outer_radius,
+                            angle=reference_marker_angle,
+                            fill_color=reference_marker_fill_color or marker_fill_color,
+                            line_color=ref_color,
                             scale=scale,
                         )
                 return
@@ -1262,6 +1311,31 @@ class CircularGauge:
                         scale=scale,
                     )
 
+            if reference_marker_angle is not None:
+                if str(reference_marker_style).lower() == "diamond":
+                    self._draw_ring_diamond_marker(
+                        draw,
+                        center_x=center_x,
+                        center_y=center_y,
+                        radius=ring_radius,
+                        angle=reference_marker_angle,
+                        fill_color=reference_marker_fill_color or marker_fill_color,
+                        scale=scale,
+                    )
+                else:
+                    ref_color = reference_marker_outline_color or reference_marker_fill_color or marker_fill_color
+                    self._draw_ring_pointer_marker(
+                        draw,
+                        center_x=center_x,
+                        center_y=center_y,
+                        inner_radius=inner_radius,
+                        outer_radius=outer_radius,
+                        angle=reference_marker_angle,
+                        fill_color=reference_marker_fill_color or marker_fill_color,
+                        line_color=ref_color,
+                        scale=scale,
+                    )
+
         return self._render_supersampled(
             background_color=background_color,
             draw_callback=draw_gradient_ring,
@@ -1285,6 +1359,10 @@ class CircularGauge:
         segment_gap_degrees: float = 0.0,
         marker_value: Optional[float] = None,
         marker_style: str = "pointer",
+        reference_marker_value: Optional[float] = None,
+        reference_marker_fill_color: Optional[Tuple[int, int, int]] = None,
+        reference_marker_outline_color: Optional[Tuple[int, int, int]] = None,
+        reference_marker_style: str = "diamond",
     ) -> Image.Image:
         """Render a categorical threshold ring with a visible current-value marker."""
         resolved_bands = self._resolve_bands(bands)
@@ -1368,6 +1446,37 @@ class CircularGauge:
                         angle=marker_angle,
                         fill_color=marker_fill_color,
                         line_color=marker_color,
+                        scale=scale,
+                    )
+
+            if reference_marker_value is not None:
+                reference_marker_angle, active_color = self._marker_angle_for_bands(
+                    reference_marker_value,
+                    resolved_bands,
+                    start_angle=start_angle,
+                    end_angle=end_angle,
+                )
+                if str(reference_marker_style).lower() == "diamond":
+                    self._draw_ring_diamond_marker(
+                        draw,
+                        center_x=center_x,
+                        center_y=center_y,
+                        radius=ring_radius,
+                        angle=reference_marker_angle,
+                        fill_color=reference_marker_fill_color or marker_fill_color or active_color,
+                        scale=scale,
+                    )
+                else:
+                    ref_color = reference_marker_outline_color or reference_marker_fill_color or marker_fill_color or active_color
+                    self._draw_ring_pointer_marker(
+                        draw,
+                        center_x=center_x,
+                        center_y=center_y,
+                        inner_radius=inner_radius,
+                        outer_radius=outer_radius,
+                        angle=reference_marker_angle,
+                        fill_color=reference_marker_fill_color or marker_fill_color or active_color,
+                        line_color=ref_color,
                         scale=scale,
                     )
 
