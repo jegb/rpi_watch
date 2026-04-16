@@ -64,7 +64,6 @@ except ImportError:
 
 DEFAULT_STEPS = ["init", "probe", "window-pattern"]
 DEFAULT_READ_PROBES = ["0x04:4", "0x09:4", "0x0A:1", "0x0C:1"]
-ARG_UNSET = "__unset__"
 STEP_CHOICES = [
     "reset",
     "init",
@@ -595,7 +594,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cs-pin",
         type=_parse_optional_int,
-        default=ARG_UNSET,
+        default=argparse.SUPPRESS,
         help="Panel CS GPIO for manual four-wire framing; defaults to config or inferred SPI CE pin",
     )
     parser.add_argument("--madctl", type=_parse_int)
@@ -668,7 +667,7 @@ def main() -> int:
         "dc_pin": args.dc_pin if args.dc_pin is not None else display_defaults.get("spi_dc_pin", 25),
         "reset_pin": args.reset_pin if args.reset_pin is not None else display_defaults.get("spi_reset_pin", 27),
         "manual_cs": args.manual_cs if args.manual_cs is not None else display_defaults.get("spi_manual_cs", True),
-        "cs_pin": display_defaults.get("spi_cs_pin", None) if args.cs_pin == ARG_UNSET else args.cs_pin,
+        "cs_pin": getattr(args, "cs_pin", display_defaults.get("spi_cs_pin", None)),
         "madctl": args.madctl if args.madctl is not None else display_defaults.get("madctl", GC9A01_SPI.DEFAULT_MADCTL),
     }
     logical_spi_cs_gpio = _infer_logical_spi_cs_gpio(display_kwargs["spi_bus"], display_kwargs["spi_device"])

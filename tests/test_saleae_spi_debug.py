@@ -97,6 +97,12 @@ class TestSaleaeSpiDebugHelpers(unittest.TestCase):
         ]:
             self.assertIn(step, MODULE.STEP_CHOICES)
 
+    def test_arg_parser_allows_omitting_cs_pin(self):
+        """Omitting --cs-pin should not trigger type parsing on a sentinel default."""
+        parser = MODULE.build_arg_parser()
+        args = parser.parse_args([])
+        self.assertFalse(hasattr(args, "cs_pin"))
+
 
 if __name__ == "__main__":
     unittest.main()
