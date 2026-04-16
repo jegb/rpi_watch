@@ -43,7 +43,7 @@ FIELD_DISPLAY_DEFAULTS = {
     'pm_4_0': {'decimal_places': 1, 'title_label': 'PM4.0', 'unit_label': 'µg/m³'},
     'pm_10_0': {'decimal_places': 1, 'title_label': 'PM10', 'unit_label': 'µg/m³'},
     'temp': {'decimal_places': 1, 'title_label': 'TEMP', 'unit_label': '°C'},
-    'humidity': {'decimal_places': 1, 'title_label': 'HUMID', 'unit_label': '%'},
+    'humidity': {'decimal_places': 1, 'title_label': 'HUMIDITY', 'unit_label': '%'},
 }
 
 FIELD_RING_DEFAULTS = {
