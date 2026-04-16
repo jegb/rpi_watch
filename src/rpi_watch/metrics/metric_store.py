@@ -1,9 +1,11 @@
 """Thread-safe storage for metric values, payload snapshots, and recent history."""
 
 from collections import deque
+import json
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -17,6 +19,7 @@ class MetricStore:
         initial_value: Optional[float] = None,
         initial_payload: Optional[dict[str, Any]] = None,
         history_size: int = 50,
+        persist_path: Optional[str] = None,
     ):
         """Initialize metric store.
 
@@ -24,9 +27,11 @@ class MetricStore:
             initial_value: Optional initial metric value
             initial_payload: Optional initial payload snapshot
             history_size: Maximum number of recent readings to retain
+            persist_path: Optional JSON cache path used to persist and restore state
         """
         self._lock = threading.RLock()
         self._history = deque(maxlen=max(1, int(history_size)))
+        self._persist_path = Path(persist_path).expanduser() if persist_path else None
         self._payload = self.normalize_payload(initial_payload) if initial_payload else None
         self._selected_field = None
         if initial_payload:
@@ -42,10 +47,13 @@ class MetricStore:
                 payload=self._payload,
                 field=self._selected_field,
             )
+        elif self._persist_path is not None:
+            self._restore_persisted_state()
         logger.info(
             f"MetricStore initialized with value={initial_value}, "
             f"payload_keys={list(self._payload.keys()) if self._payload else None}, "
-            f"history_size={self._history.maxlen}"
+            f"history_size={self._history.maxlen}, "
+            f"persist_path={str(self._persist_path) if self._persist_path else None}"
         )
 
     @staticmethod
@@ -81,6 +89,120 @@ class MetricStore:
                 "field": field,
                 "payload": self._copy_payload(payload),
             }
+        )
+
+    def _serialize_state_locked(self) -> dict[str, Any]:
+        """Serialize current state for persistence."""
+        return {
+            "value": self._value,
+            "timestamp": self._timestamp,
+            "selected_field": self._selected_field,
+            "payload": self._copy_payload(self._payload),
+            "history": [self._copy_history_entry(entry) for entry in self._history],
+        }
+
+    def _persist_state_locked(self) -> None:
+        """Persist current state to disk."""
+        if self._persist_path is None:
+            return
+
+        try:
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = self._persist_path.with_suffix(f"{self._persist_path.suffix}.tmp")
+            with temp_path.open("w", encoding="utf-8") as handle:
+                json.dump(self._serialize_state_locked(), handle, ensure_ascii=False)
+            temp_path.replace(self._persist_path)
+        except Exception as exc:
+            logger.warning("Failed to persist metric store state to %s: %s", self._persist_path, exc)
+
+    def _restore_persisted_state(self) -> None:
+        """Restore state from disk if a cache file exists."""
+        if self._persist_path is None or not self._persist_path.exists():
+            return
+
+        try:
+            with self._persist_path.open("r", encoding="utf-8") as handle:
+                state = json.load(handle)
+        except Exception as exc:
+            logger.warning("Failed to read metric store cache from %s: %s", self._persist_path, exc)
+            return
+
+        with self._lock:
+            self._value = None
+            self._payload = None
+            self._timestamp = None
+            self._selected_field = None
+            self._history.clear()
+
+            payload = state.get("payload")
+            self._payload = self.normalize_payload(payload) if isinstance(payload, dict) else None
+
+            selected_field = state.get("selected_field")
+            self._selected_field = str(selected_field) if selected_field is not None else None
+
+            timestamp = state.get("timestamp")
+            try:
+                self._timestamp = float(timestamp) if timestamp is not None else None
+            except (TypeError, ValueError):
+                self._timestamp = None
+
+            value = state.get("value")
+            try:
+                self._value = self._coerce_numeric(value) if value is not None else None
+            except (TypeError, ValueError):
+                self._value = None
+
+            history_entries = state.get("history")
+            if isinstance(history_entries, list):
+                for raw_entry in history_entries[-self._history.maxlen:]:
+                    if not isinstance(raw_entry, dict):
+                        continue
+
+                    entry_timestamp = raw_entry.get("timestamp")
+                    try:
+                        entry_timestamp = float(entry_timestamp)
+                    except (TypeError, ValueError):
+                        continue
+
+                    entry_value = raw_entry.get("value")
+                    try:
+                        entry_value = self._coerce_numeric(entry_value) if entry_value is not None else None
+                    except (TypeError, ValueError):
+                        entry_value = None
+
+                    entry_field = raw_entry.get("field")
+                    if entry_field is not None:
+                        entry_field = str(entry_field)
+
+                    entry_payload = raw_entry.get("payload")
+                    if isinstance(entry_payload, dict):
+                        entry_payload = self.normalize_payload(entry_payload)
+                    else:
+                        entry_payload = None
+
+                    self._append_history_entry(
+                        value=entry_value,
+                        timestamp=entry_timestamp,
+                        payload=entry_payload,
+                        field=entry_field,
+                    )
+
+            if self._payload is None and self._history:
+                latest_entry = self._history[-1]
+                self._payload = self._copy_payload(latest_entry["payload"])
+                if self._value is None:
+                    self._value = latest_entry["value"]
+                if self._selected_field is None:
+                    self._selected_field = latest_entry["field"]
+                if self._timestamp is None:
+                    self._timestamp = latest_entry["timestamp"]
+
+        logger.info(
+            "Restored metric store state from %s (value=%s, field=%s, history=%s)",
+            self._persist_path,
+            self._value,
+            self._selected_field,
+            len(self._history),
         )
 
     @staticmethod
@@ -184,6 +306,7 @@ class MetricStore:
                 f"Metric updated: value={self._value}, field={self._selected_field}, "
                 f"timestamp={self._timestamp}"
             )
+            self._persist_state_locked()
 
     def update_payload(
         self,
@@ -214,6 +337,7 @@ class MetricStore:
                 f"Payload updated: selected_field={selected_field}, "
                 f"selected_value={selected_value}, timestamp={self._timestamp}"
             )
+            self._persist_state_locked()
 
         return (selected_field, selected_value)
 
@@ -302,4 +426,9 @@ class MetricStore:
             self._timestamp = None
             self._selected_field = None
             self._history.clear()
+            if self._persist_path is not None:
+                try:
+                    self._persist_path.unlink(missing_ok=True)
+                except Exception as exc:
+                    logger.warning("Failed to remove metric store cache %s: %s", self._persist_path, exc)
             logger.info("Metric store reset")

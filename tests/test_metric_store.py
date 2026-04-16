@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 import unittest
 import threading
 import time
+import tempfile
 
 from rpi_watch.metrics.metric_store import MetricStore
 
@@ -205,6 +206,42 @@ class TestMetricStore(unittest.TestCase):
         self.assertIsNone(self.store.get_payload())
         self.assertIsNone(self.store.get_selected_field())
         self.assertEqual(self.store.get_history(), [])
+
+    def test_persisted_payload_restores_on_new_store(self):
+        """Test cached payload/history restore across store instances."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = Path(temp_dir) / "metric_store.json"
+            writer = MetricStore(history_size=5, persist_path=str(cache_path))
+            writer.update_payload(
+                {"pm_2_5": "8.0", "temp": "27.1"},
+                timestamp=100.0,
+                preferred_field="pm_2_5",
+            )
+            writer.update_payload(
+                {"pm_2_5": "7.4", "temp": "26.4"},
+                timestamp=101.0,
+                preferred_field="pm_2_5",
+            )
+
+            restored = MetricStore(history_size=5, persist_path=str(cache_path))
+            self.assertEqual(restored.get_latest(), 7.4)
+            self.assertEqual(restored.get_selected_field(), "pm_2_5")
+            self.assertEqual(restored.get_payload(), {"pm_2_5": 7.4, "temp": 26.4})
+            self.assertEqual(
+                restored.get_field_history("pm_2_5"),
+                [(100.0, 8.0), (101.0, 7.4)],
+            )
+
+    def test_reset_removes_persisted_cache(self):
+        """Test reset clears the persisted cache file."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = Path(temp_dir) / "metric_store.json"
+            store = MetricStore(persist_path=str(cache_path))
+            store.update_payload({"pm_2_5": "8.0"})
+            self.assertTrue(cache_path.exists())
+
+            store.reset()
+            self.assertFalse(cache_path.exists())
 
     def test_multiple_updates(self):
         """Test multiple sequential updates."""

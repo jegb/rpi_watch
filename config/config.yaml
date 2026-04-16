@@ -25,13 +25,17 @@ mqtt:
   keepalive: 60                  # Seconds between MQTT keepalive pings
   json_field: "pm_2_5"           # Legacy preferred field hint. Subscriber now stores the full payload either way.
 
+state:
+  cache_path: "data/metric_store.json"  # Last known payload/history cache used to seed startup before MQTT refreshes
+  history_size: 50
+
 metric_display:
   layout_mode: "single_metric"   # single_metric, pm_bars, metric_ring
   color_scheme: "BRIGHT"         # BRIGHT, OCEAN, FOREST, SUNSET, MONOCHROME
   metric_key: "pm_2_5"           # Preferred field to render from a multi-metric MQTT payload
   rotate_metrics: true           # Cycle through fields from the latest payload instead of pinning one metric
   rotate_interval_seconds: 6.0   # Seconds each metric stays on screen before switching
-  rotate_fields: ["pm_2_5", "pm_10_0", "pm_1_0", "pm_4_0", "temp", "humidity"]
+  rotate_fields: ["pm_1_0", "pm_2_5", "pm_4_0", "pm_10_0", "temp", "humidity"]
   title_label: "PM2.5"           # Small label above the large value
   decimal_places: 1
   font_size: 108             # Large centered numeric display; slightly reduced to leave more breathing room

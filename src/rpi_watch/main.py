@@ -23,10 +23,10 @@ from .utils import setup_logging
 logger = logging.getLogger(__name__)
 
 DEFAULT_FIELD_PRIORITY = (
-    'pm_2_5',
-    'pm_10_0',
     'pm_1_0',
+    'pm_2_5',
     'pm_4_0',
+    'pm_10_0',
     'temp',
     'humidity',
 )
@@ -62,7 +62,11 @@ class RPiWatch:
         logger.info("Initializing RPi Watch application")
 
         # Initialize components
-        self.metric_store = MetricStore()
+        state_config = self.config.get('state', {})
+        self.metric_store = MetricStore(
+            history_size=state_config.get('history_size', 50),
+            persist_path=state_config.get('cache_path'),
+        )
         self.display = None
         self.renderer = None
         self.pm_bars_layout = None

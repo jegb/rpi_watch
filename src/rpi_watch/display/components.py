@@ -280,7 +280,7 @@ class SparklineRenderer:
         line_color: Tuple[int, int, int] = (255, 255, 255),
         fill_color: Optional[Tuple[int, int, int]] = None,
         stroke_width: int = 2,
-        point_radius: int = 2,
+        point_radius: int = 3,
     ) -> Image.Image:
         """Render a sparkline image from the supplied history."""
         img = Image.new('RGB', (self.width, self.height), background_color)
@@ -326,14 +326,30 @@ class SparklineRenderer:
 
         draw.line(points, fill=line_color, width=stroke_width)
 
-        last_x, last_y = points[-1]
-        draw.ellipse(
-            [
-                (last_x - point_radius, last_y - point_radius),
-                (last_x + point_radius, last_y + point_radius),
-            ],
-            fill=line_color,
+        marker_inner_color = tuple(
+            max(0, min(255, int((channel * 0.72) + (background * 0.28))))
+            for channel, background in zip(line_color, background_color)
         )
+
+        # Mark every sample so short tails remain readable even when the trend is flat.
+        for point_index, (x, y) in enumerate(points):
+            radius = point_radius + 1 if point_index == len(points) - 1 else point_radius
+            draw.ellipse(
+                [
+                    (x - radius, y - radius),
+                    (x + radius, y + radius),
+                ],
+                fill=background_color,
+                outline=line_color,
+                width=1,
+            )
+            draw.ellipse(
+                [
+                    (x - max(1, radius - 1), y - max(1, radius - 1)),
+                    (x + max(1, radius - 1), y + max(1, radius - 1)),
+                ],
+                fill=marker_inner_color,
+            )
 
         return img
 
