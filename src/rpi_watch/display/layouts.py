@@ -83,6 +83,7 @@ class DisplayLayout:
         width: int = 240,
         height: int = 240,
         color_scheme: ColorScheme = ColorScheme.BRIGHT,
+        font_path: Optional[str] = None,
     ):
         """Initialize layout.
 
@@ -95,10 +96,11 @@ class DisplayLayout:
         self.height = height
         self.color_scheme = color_scheme.value
         self.bg_color = self.color_scheme["background"]
+        self.font_path = font_path
 
-        self.text_renderer = TextRenderer(width=width, height=height)
-        self.gauge = CircularGauge(width=width, height=height)
-        self.progress = ProgressBar(width=width, height=height)
+        self.text_renderer = TextRenderer(width=width, height=height, font_path=font_path)
+        self.gauge = CircularGauge(width=width, height=height, font_path=font_path)
+        self.progress = ProgressBar(width=width, height=height, font_path=font_path)
 
     def render(self, **kwargs) -> Image.Image:
         """Render layout with given data.
@@ -456,30 +458,37 @@ class RadialDashboardLayout(DisplayLayout):
             ),
         ]
 
-        from PIL import ImageFont
-
-        font = ImageFont.load_default()
+        value_font = self.text_renderer.get_font(TextSize.SMALL)
+        label_font = self.text_renderer.get_font(TextSize.TINY)
 
         for x, y, value, label in positions:
             value_text = f"{value:.{decimal_places}f}"
 
             # Draw value
-            bbox = draw.textbbox((0, 0), value_text, font=font)
+            bbox = draw.textbbox((0, 0), value_text, font=value_font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
             text_x = x - text_width // 2
             text_y = y - text_height // 2
 
-            draw.text((text_x, text_y), value_text, fill=self.color_scheme["primary"], font=font)
+            draw.text(
+                (text_x, text_y),
+                value_text,
+                fill=self.color_scheme["primary"],
+                font=value_font,
+            )
 
             # Draw label below
-            label_bbox = draw.textbbox((0, 0), label, font=font)
+            label_bbox = draw.textbbox((0, 0), label, font=label_font)
             label_width = label_bbox[2] - label_bbox[0]
             label_x = x - label_width // 2
             label_y = y + text_height + 5
 
             draw.text(
-                (label_x, label_y), label, fill=self.color_scheme["secondary"], font=font
+                (label_x, label_y),
+                label,
+                fill=self.color_scheme["secondary"],
+                font=label_font,
             )
 
             # Draw small circle at position
@@ -533,9 +542,7 @@ class ProgressStackLayout(DisplayLayout):
         bar_height = max(5, (self.height - 20) // num_bars)
         start_y = 10
 
-        from PIL import ImageFont
-
-        font = ImageFont.load_default()
+        font = self.text_renderer.get_font(TextSize.TINY)
 
         for i, metric in enumerate(metrics):
             value = metric.get("value", 0)

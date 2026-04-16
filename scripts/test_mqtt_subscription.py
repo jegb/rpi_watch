@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone MQTT connectivity/subscription probe.
-
-Checks three layers independently:
-1. TCP reachability to the broker host/port
-2. MQTT connection establishment
-3. First parsed metric received on the configured topic
-"""
+"""Standalone MQTT connectivity/subscription probe."""
 
 import argparse
 import socket
@@ -83,6 +77,7 @@ def _parse_args() -> argparse.Namespace:
 
 def _resolve_mqtt_config(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
     mqtt_config = config.get("mqtt", {})
+    metric_config = config.get("metric_display", {})
     return {
         "broker_host": args.broker_host or mqtt_config.get("broker_host", "localhost"),
         "broker_port": args.broker_port or mqtt_config.get("broker_port", 1883),
@@ -92,6 +87,7 @@ def _resolve_mqtt_config(config: Dict[str, Any], args: argparse.Namespace) -> Di
         "json_field": (
             args.json_field if args.json_field is not None else mqtt_config.get("json_field")
         ),
+        "metric_key": metric_config.get("metric_key"),
     }
 
 
@@ -113,12 +109,12 @@ def main() -> int:
 
     logger.info(f"Config: {config_path}")
     logger.info(
-        "Probing MQTT broker=%s:%s topic=%s qos=%s json_field=%s",
+        "Probing MQTT broker=%s:%s topic=%s qos=%s preferred_field=%s",
         mqtt_config["broker_host"],
         mqtt_config["broker_port"],
         mqtt_config["topic"],
         mqtt_config["qos"],
-        mqtt_config["json_field"],
+        mqtt_config["metric_key"] or mqtt_config["json_field"],
     )
 
     tcp_error = _probe_tcp(
@@ -167,11 +163,33 @@ def main() -> int:
                 logger.info("MQTT connection established; waiting for first message...")
                 connected_logged = True
 
+            payload = metric_store.get_payload()
             value, timestamp = metric_store.get_with_timestamp()
+            if payload is not None and value is not None:
+                logger.info(
+                    "Received payload keys: %s",
+                    ", ".join(payload.keys()),
+                )
+                selected_field = metric_store.get_selected_field()
+                age_seconds = 0.0 if timestamp is None else max(0.0, time.time() - timestamp)
+                logger.info(
+                    "Selected metric %s=%.3f on %s (age %.3fs)",
+                    selected_field or "<scalar>",
+                    value,
+                    mqtt_config["topic"],
+                    age_seconds,
+                )
+                return 0
+            if payload is not None:
+                logger.warning(
+                    "Received payload with no numeric fields: %s",
+                    ", ".join(payload.keys()),
+                )
+                return 6
             if value is not None:
                 age_seconds = 0.0 if timestamp is None else max(0.0, time.time() - timestamp)
                 logger.info(
-                    "Received metric %.3f on %s (age %.3fs)",
+                    "Received scalar metric %.3f on %s (age %.3fs)",
                     value,
                     mqtt_config["topic"],
                     age_seconds,

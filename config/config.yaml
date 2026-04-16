@@ -23,10 +23,10 @@ mqtt:
   topic: "airquality/sensor"     # SPS Monitor topic (publishes JSON with pm_2_5, temp, humidity, pm_1_0, pm_4_0, pm_10_0)
   qos: 1                         # Quality of service level (0=at most once, 1=at least once, 2=exactly once)
   keepalive: 60                  # Seconds between MQTT keepalive pings
-  json_field: "pm_2_5"           # Extract this field from JSON payload (e.g., "pm_2_5", "temp", "humidity")
-                                 # If omitted, uses first numeric value found
+  json_field: "pm_2_5"           # Legacy preferred field hint. Subscriber now stores the full payload either way.
 
 metric_display:
+  metric_key: "pm_2_5"           # Preferred field to render from a multi-metric MQTT payload
   decimal_places: 1
   font_size: 116             # Large centered numeric display; renderer auto-fits wider values
   unit_font_size: 30         # Separate unit label below the number

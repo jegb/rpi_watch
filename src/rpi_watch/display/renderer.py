@@ -5,10 +5,11 @@ circular masking for the round 240x240 display.
 """
 
 import logging
-from pathlib import Path
 from typing import Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
+
+from .fonts import load_font
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ class MetricRenderer:
         self.padding = padding
         self.unit_gap = unit_gap
         self._font_cache = {}
+        self.resolved_font_source = None
+        self.using_scalable_font = False
 
         # Initialize font
         self.font = self._load_font(font_path, font_size)
@@ -59,30 +62,9 @@ class MetricRenderer:
         logger.info(
             f"MetricRenderer initialized: {width}x{height}, "
             f"font_size={font_size}, unit_font_size={self.unit_font_size}, "
-            f"font_path={font_path}"
+            f"font_path={font_path}, resolved_font={self.resolved_font_source}, "
+            f"scalable_font={self.using_scalable_font}"
         )
-
-    def _font_candidates(self, font_path: Optional[str]) -> list[str]:
-        """Return ordered font candidates for this system."""
-        candidates = []
-        if font_path:
-            candidates.append(font_path)
-
-        candidates.extend([
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-            "/System/Library/Fonts/Helvetica.ttc",  # macOS
-            "C:\\Windows\\Fonts\\arialbd.ttf",  # Windows fallback
-            "C:\\Windows\\Fonts\\arial.ttf",
-        ])
-
-        deduped = []
-        for candidate in candidates:
-            if candidate not in deduped:
-                deduped.append(candidate)
-        return deduped
 
     def _load_font(self, font_path: Optional[str], font_size: int) -> ImageFont.FreeTypeFont:
         """Load a TrueType font.
@@ -98,19 +80,12 @@ class MetricRenderer:
         if cache_key in self._font_cache:
             return self._font_cache[cache_key]
 
-        for font_candidate in self._font_candidates(font_path):
-            try:
-                font_obj = ImageFont.truetype(font_candidate, font_size)
-                self._font_cache[cache_key] = font_obj
-                logger.debug(f"Loaded font: {font_candidate}")
-                return font_obj
-            except (IOError, OSError):
-                continue
-
-        logger.warning("No TrueType font found, using default font (may be limited)")
-        fallback_font = ImageFont.load_default()
-        self._font_cache[cache_key] = fallback_font
-        return fallback_font
+        font_obj, resolved_source, used_scalable_font = load_font(font_path, font_size)
+        if resolved_source and self.resolved_font_source is None:
+            self.resolved_font_source = resolved_source
+        self.using_scalable_font = self.using_scalable_font or used_scalable_font
+        self._font_cache[cache_key] = font_obj
+        return font_obj
 
     def _fit_font(
         self,

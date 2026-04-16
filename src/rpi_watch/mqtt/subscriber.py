@@ -1,14 +1,10 @@
-"""MQTT subscriber for receiving metric updates from broker.
-
-Handles connection to MQTT broker, message parsing, and thread-safe metric updates.
-"""
+"""MQTT subscriber for receiving metric payloads from broker."""
 
 import json
 import logging
-import threading
 import time
 import warnings
-from typing import Callable, Optional
+from typing import Any, Optional
 
 # Suppress paho-mqtt deprecation warnings
 warnings.filterwarnings('ignore', category=DeprecationWarning)
@@ -17,6 +13,8 @@ try:
     import paho.mqtt.client as mqtt
 except ImportError:
     mqtt = None
+
+from ..metrics import MetricStore
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +45,8 @@ class MQTTSubscriber:
             qos: Quality of Service level (0, 1, or 2)
             keepalive: Seconds between keepalive pings
             metric_store: MetricStore object for storing received values
-            json_field: Optional field name to extract from JSON payload
-                       (e.g., "pm_2_5", "temp"). If None, uses first numeric value.
+            json_field: Optional preferred field name used when a payload contains
+                       multiple numeric fields. The full payload is still stored.
         """
         if mqtt is None:
             raise RuntimeError("paho-mqtt not installed. Install via: pip install paho-mqtt")
@@ -74,6 +72,8 @@ class MQTTSubscriber:
         self.running = False
         self.connected = False
         self.last_value = None
+        self.last_field = None
+        self.last_payload = None
         self.last_update_time = None
 
         logger.info(
@@ -118,46 +118,55 @@ class MQTTSubscriber:
             # Try to parse as JSON first
             try:
                 data = json.loads(payload)
-
-                # If json_field is specified, try to extract that field
-                if self.json_field and isinstance(data, dict):
-                    if self.json_field in data:
-                        value = float(data[self.json_field])
-                        logger.debug(f"Extracted field '{self.json_field}': {value}")
-                    else:
-                        available_fields = ', '.join(data.keys())
-                        logger.warning(
-                            f"Field '{self.json_field}' not found in JSON. "
-                            f"Available fields: {available_fields}"
-                        )
-                        return
-                elif isinstance(data, dict) and 'value' in data:
-                    value = float(data['value'])
-                elif isinstance(data, (int, float)):
-                    value = float(data)
-                else:
-                    # Try to extract first numeric value from JSON
-                    for v in data.values() if isinstance(data, dict) else data:
-                        try:
-                            value = float(v)
-                            break
-                        except (ValueError, TypeError):
-                            continue
-                    else:
-                        logger.warning(f"Could not extract numeric value from JSON: {payload}")
-                        return
             except json.JSONDecodeError:
                 # Not JSON, try direct float conversion
-                value = float(payload)
+                data = float(payload)
 
-            # Update metric store if available
-            if self.metric_store:
-                self.metric_store.update(value)
+            selected_field: Optional[str] = None
+            value: Optional[float] = None
+            normalized_payload: Optional[dict[str, Any]] = None
+
+            if isinstance(data, dict):
+                normalized_payload = (
+                    self.metric_store.normalize_payload(data)
+                    if self.metric_store
+                    else data
+                )
+
+                if self.metric_store:
+                    selected_field, value = self.metric_store.update_payload(
+                        normalized_payload,
+                        preferred_field=self.json_field,
+                    )
+                else:
+                    selected_field, value = MetricStore.select_numeric_field(
+                        normalized_payload,
+                        preferred_field=self.json_field,
+                        previous_field=self.last_field,
+                    )
+
+                if value is None:
+                    logger.warning(f"Could not extract numeric value from JSON payload: {payload}")
+                    self.last_payload = normalized_payload
+                    self.last_update_time = time.time()
+                    return
+            elif isinstance(data, (int, float)):
+                value = float(data)
+                if self.metric_store:
+                    self.metric_store.update(value)
+            else:
+                logger.warning(f"Unsupported MQTT payload type: {type(data)!r}")
+                return
 
             self.last_value = value
+            self.last_field = selected_field
+            self.last_payload = normalized_payload
             self.last_update_time = time.time()
 
-            logger.info(f"Updated metric: {value}")
+            if selected_field:
+                logger.info(f"Updated metric: {selected_field}={value}")
+            else:
+                logger.info(f"Updated metric: {value}")
 
         except (ValueError, TypeError) as e:
             logger.warning(f"Failed to parse message payload '{payload}': {e}")
@@ -202,7 +211,7 @@ class MQTTSubscriber:
             logger.error(f"Error stopping MQTT subscriber: {e}")
 
     def get_latest_metric(self) -> Optional[float]:
-        """Get the most recently received metric value.
+        """Get the most recently selected metric value.
 
         Returns:
             Float value or None if no message received yet

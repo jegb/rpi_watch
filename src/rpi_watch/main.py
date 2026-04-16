@@ -22,6 +22,24 @@ from .utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_FIELD_PRIORITY = (
+    'pm_2_5',
+    'pm_10_0',
+    'pm_1_0',
+    'pm_4_0',
+    'temp',
+    'humidity',
+)
+
+FIELD_DISPLAY_DEFAULTS = {
+    'pm_1_0': {'decimal_places': 1, 'unit_label': 'µg/m³'},
+    'pm_2_5': {'decimal_places': 1, 'unit_label': 'µg/m³'},
+    'pm_4_0': {'decimal_places': 1, 'unit_label': 'µg/m³'},
+    'pm_10_0': {'decimal_places': 1, 'unit_label': 'µg/m³'},
+    'temp': {'decimal_places': 1, 'unit_label': '°C'},
+    'humidity': {'decimal_places': 1, 'unit_label': '%'},
+}
+
 
 class RPiWatch:
     """Main application controller for RPi Watch."""
@@ -127,6 +145,12 @@ class RPiWatch:
         """Return metric display configuration."""
         return self.config.get('metric_display', {})
 
+    def _get_preferred_metric_field(self) -> Optional[str]:
+        """Return the preferred payload field to display."""
+        metric_config = self._get_metric_display_config()
+        mqtt_config = self.config.get('mqtt', {})
+        return metric_config.get('metric_key') or mqtt_config.get('json_field')
+
     def _get_demo_metric(self) -> Optional[dict]:
         """Return demo metric settings when configured.
 
@@ -169,6 +193,47 @@ class RPiWatch:
         )
         self.display.display(image)
 
+    def _select_display_metric(self, payload: Optional[dict]) -> Optional[dict]:
+        """Choose which field from the latest payload should be displayed."""
+        if not payload:
+            return None
+
+        numeric_payload = self.metric_store.extract_numeric_payload(payload)
+        if not numeric_payload:
+            return None
+
+        preferred_field = self._get_preferred_metric_field()
+        metric_config = self._get_metric_display_config()
+
+        field_name = None
+        if preferred_field and preferred_field in numeric_payload:
+            field_name = preferred_field
+        else:
+            for candidate in DEFAULT_FIELD_PRIORITY:
+                if candidate in numeric_payload:
+                    field_name = candidate
+                    break
+
+        if field_name is None:
+            field_name = next(iter(numeric_payload))
+
+        display_defaults = FIELD_DISPLAY_DEFAULTS.get(field_name, {})
+        configured_unit_label = metric_config.get('unit_label')
+        if configured_unit_label and field_name == preferred_field:
+            unit_label = configured_unit_label
+        else:
+            unit_label = display_defaults.get('unit_label', configured_unit_label or '')
+
+        return {
+            'field': field_name,
+            'value': numeric_payload[field_name],
+            'decimal_places': metric_config.get(
+                'decimal_places',
+                display_defaults.get('decimal_places', 1),
+            ),
+            'unit_label': unit_label,
+        }
+
     def run(self) -> None:
         """Run the main event loop.
 
@@ -210,18 +275,40 @@ class RPiWatch:
 
             while self.running:
                 try:
-                    # Get current metric value
+                    current_payload = self.metric_store.get_payload()
                     current_value = self.metric_store.get_latest()
+                    selected_metric = self._select_display_metric(current_payload)
 
-                    if current_value is not None:
+                    if selected_metric is not None:
                         render_state = (
                             'metric',
+                            selected_metric['field'],
+                            selected_metric['value'],
+                            selected_metric['decimal_places'],
+                            selected_metric['unit_label'],
+                        )
+
+                        # Only update display if value changed (reduces SPI traffic)
+                        if render_state != last_render_state:
+                            self._display_metric_value(
+                                selected_metric['value'],
+                                decimal_places=selected_metric['decimal_places'],
+                                unit_label=selected_metric['unit_label'],
+                            )
+                            last_render_state = render_state
+                            frame_count += 1
+                            logger.debug(
+                                f"Display updated (frame {frame_count}): "
+                                f"{selected_metric['field']}={selected_metric['value']}"
+                            )
+                    elif current_value is not None:
+                        render_state = (
+                            'scalar',
                             current_value,
                             metric_config.get('decimal_places', 1),
                             metric_config.get('unit_label', ''),
                         )
 
-                        # Only update display if value changed (reduces SPI traffic)
                         if render_state != last_render_state:
                             self._display_metric_value(
                                 current_value,

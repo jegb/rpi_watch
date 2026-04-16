@@ -1,80 +1,296 @@
-"""Thread-safe storage for metric values.
+"""Thread-safe storage for metric values, payload snapshots, and recent history."""
 
-Provides synchronized access to the latest metric value received from MQTT
-with timestamp tracking.
-"""
-
+from collections import deque
 import logging
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class MetricStore:
-    """Thread-safe storage for metric values with timestamp tracking."""
+    """Thread-safe storage for metric values and payloads with timestamps."""
 
-    def __init__(self, initial_value: Optional[float] = None):
+    def __init__(
+        self,
+        initial_value: Optional[float] = None,
+        initial_payload: Optional[dict[str, Any]] = None,
+        history_size: int = 50,
+    ):
         """Initialize metric store.
 
         Args:
             initial_value: Optional initial metric value
+            initial_payload: Optional initial payload snapshot
+            history_size: Maximum number of recent readings to retain
         """
-        self._lock = threading.RLock()  # Re-entrant lock
-        self._value = initial_value
-        self._timestamp = time.time() if initial_value is not None else None
-        logger.info(f"MetricStore initialized with value={initial_value}")
+        self._lock = threading.RLock()
+        self._history = deque(maxlen=max(1, int(history_size)))
+        self._payload = self.normalize_payload(initial_payload) if initial_payload else None
+        self._selected_field = None
+        if initial_payload:
+            self._selected_field, selected_value = self.select_numeric_field(self._payload)
+            self._value = selected_value if initial_value is None else initial_value
+        else:
+            self._value = initial_value
+        self._timestamp = time.time() if self._value is not None or self._payload else None
+        if self._timestamp is not None:
+            self._append_history_entry(
+                value=self._value,
+                timestamp=self._timestamp,
+                payload=self._payload,
+                field=self._selected_field,
+            )
+        logger.info(
+            f"MetricStore initialized with value={initial_value}, "
+            f"payload_keys={list(self._payload.keys()) if self._payload else None}, "
+            f"history_size={self._history.maxlen}"
+        )
 
-    def update(self, value: float, timestamp: Optional[float] = None) -> None:
+    @staticmethod
+    def _copy_payload(payload: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+        """Return a shallow copy of a payload snapshot."""
+        if payload is None:
+            return None
+        return dict(payload)
+
+    @classmethod
+    def _copy_history_entry(cls, entry: dict[str, Any]) -> dict[str, Any]:
+        """Return a defensive copy of a history entry."""
+        return {
+            "timestamp": entry["timestamp"],
+            "value": entry["value"],
+            "field": entry["field"],
+            "payload": cls._copy_payload(entry["payload"]),
+        }
+
+    def _append_history_entry(
+        self,
+        *,
+        value: Optional[float],
+        timestamp: float,
+        payload: Optional[dict[str, Any]],
+        field: Optional[str],
+    ) -> None:
+        """Append a new reading snapshot to bounded history."""
+        self._history.append(
+            {
+                "timestamp": timestamp,
+                "value": value,
+                "field": field,
+                "payload": self._copy_payload(payload),
+            }
+        )
+
+    @staticmethod
+    def _coerce_numeric(value: Any) -> float:
+        """Convert a numeric-like value to float."""
+        if isinstance(value, bool):
+            raise TypeError("bool is not treated as a metric value")
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("empty string")
+            return float(stripped)
+        raise TypeError(f"Unsupported numeric type: {type(value)!r}")
+
+    @classmethod
+    def normalize_payload(cls, payload: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+        """Normalize a payload by converting numeric-like values to floats."""
+        if payload is None:
+            return None
+
+        normalized: dict[str, Any] = {}
+        for key, value in payload.items():
+            try:
+                normalized[key] = cls._coerce_numeric(value)
+            except (TypeError, ValueError):
+                normalized[key] = value
+        return normalized
+
+    @classmethod
+    def extract_numeric_payload(cls, payload: Optional[dict[str, Any]]) -> dict[str, float]:
+        """Return only numeric fields from a payload."""
+        if not payload:
+            return {}
+
+        numeric_payload: dict[str, float] = {}
+        for key, value in payload.items():
+            try:
+                numeric_payload[key] = cls._coerce_numeric(value)
+            except (TypeError, ValueError):
+                continue
+        return numeric_payload
+
+    @classmethod
+    def select_numeric_field(
+        cls,
+        payload: Optional[dict[str, Any]],
+        preferred_field: Optional[str] = None,
+        previous_field: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[float]]:
+        """Select a numeric field from a payload.
+
+        Selection order:
+        1. preferred_field if present and numeric
+        2. previous_field if present and numeric
+        3. ``value`` if present and numeric
+        4. first numeric field in payload order
+        """
+        numeric_payload = cls.extract_numeric_payload(payload)
+        if not numeric_payload:
+            return (None, None)
+
+        for field_name in (preferred_field, previous_field, "value"):
+            if field_name and field_name in numeric_payload:
+                return (field_name, numeric_payload[field_name])
+
+        first_key = next(iter(numeric_payload))
+        return (first_key, numeric_payload[first_key])
+
+    def update(
+        self,
+        value: float,
+        timestamp: Optional[float] = None,
+        payload: Optional[dict[str, Any]] = None,
+        source_field: Optional[str] = None,
+    ) -> None:
         """Update the stored metric value.
-
-        Thread-safe update operation.
 
         Args:
             value: New metric value
             timestamp: Optional timestamp. If None, uses current time.
+            payload: Optional payload snapshot associated with the value
+            source_field: Optional payload field name used to derive the value
         """
+        normalized_payload = self.normalize_payload(payload) if payload is not None else None
         with self._lock:
             self._value = float(value)
+            if normalized_payload is not None:
+                self._payload = normalized_payload
+            if source_field is not None:
+                self._selected_field = source_field
             self._timestamp = timestamp if timestamp is not None else time.time()
-            logger.debug(f"Metric updated: value={self._value}, timestamp={self._timestamp}")
+            self._append_history_entry(
+                value=self._value,
+                timestamp=self._timestamp,
+                payload=normalized_payload,
+                field=source_field,
+            )
+            logger.debug(
+                f"Metric updated: value={self._value}, field={self._selected_field}, "
+                f"timestamp={self._timestamp}"
+            )
+
+    def update_payload(
+        self,
+        payload: dict[str, Any],
+        timestamp: Optional[float] = None,
+        preferred_field: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[float]]:
+        """Update the store with a full payload snapshot."""
+        normalized_payload = self.normalize_payload(payload)
+
+        with self._lock:
+            selected_field, selected_value = self.select_numeric_field(
+                normalized_payload,
+                preferred_field=preferred_field,
+                previous_field=self._selected_field,
+            )
+            self._payload = normalized_payload
+            self._timestamp = timestamp if timestamp is not None else time.time()
+            self._selected_field = selected_field
+            self._value = selected_value
+            self._append_history_entry(
+                value=self._value,
+                timestamp=self._timestamp,
+                payload=self._payload,
+                field=self._selected_field,
+            )
+            logger.debug(
+                f"Payload updated: selected_field={selected_field}, "
+                f"selected_value={selected_value}, timestamp={self._timestamp}"
+            )
+
+        return (selected_field, selected_value)
 
     def get_latest(self) -> Optional[float]:
-        """Get the most recent metric value.
-
-        Returns:
-            Float value or None if never updated
-        """
+        """Get the most recent selected metric value."""
         with self._lock:
             return self._value
 
     def get_with_timestamp(self) -> Tuple[Optional[float], Optional[float]]:
-        """Get the metric value along with timestamp.
-
-        Returns:
-            Tuple of (value, timestamp) or (None, None) if never updated
-        """
+        """Get the metric value along with timestamp."""
         with self._lock:
             return (self._value, self._timestamp)
 
-    def get_age_seconds(self) -> Optional[float]:
-        """Get age of the current metric value in seconds.
+    def get_payload(self) -> Optional[dict[str, Any]]:
+        """Get the most recent payload snapshot."""
+        with self._lock:
+            return self._copy_payload(self._payload)
 
-        Returns:
-            Age in seconds, or None if no value set
-        """
+    def get_numeric_payload(self) -> dict[str, float]:
+        """Get numeric payload fields only."""
+        with self._lock:
+            return self.extract_numeric_payload(self._payload)
+
+    def get_history(self, limit: Optional[int] = None) -> list[dict[str, Any]]:
+        """Get recent reading snapshots in chronological order."""
+        with self._lock:
+            history = list(self._history)
+
+        if limit is not None:
+            if limit <= 0:
+                return []
+            history = history[-limit:]
+
+        return [self._copy_history_entry(entry) for entry in history]
+
+    def get_field_history(
+        self,
+        field_name: str,
+        limit: Optional[int] = None,
+    ) -> list[tuple[float, float]]:
+        """Get a time series for a specific numeric field."""
+        series: list[tuple[float, float]] = []
+        for entry in self.get_history(limit=limit):
+            payload = entry["payload"]
+            if payload is not None and field_name in payload:
+                try:
+                    series.append((entry["timestamp"], self._coerce_numeric(payload[field_name])))
+                except (TypeError, ValueError):
+                    continue
+            elif entry["field"] == field_name and entry["value"] is not None:
+                series.append((entry["timestamp"], float(entry["value"])))
+        return series
+
+    def get_field(self, field_name: str) -> Optional[float]:
+        """Get a single numeric field from the current payload."""
+        with self._lock:
+            if self._payload is None:
+                return None
+            try:
+                return self._coerce_numeric(self._payload[field_name])
+            except (KeyError, TypeError, ValueError):
+                return None
+
+    def get_selected_field(self) -> Optional[str]:
+        """Get the field associated with the latest selected metric value."""
+        with self._lock:
+            return self._selected_field
+
+    def get_age_seconds(self) -> Optional[float]:
+        """Get age of the current metric value in seconds."""
         with self._lock:
             if self._timestamp is None:
                 return None
             return time.time() - self._timestamp
 
     def has_value(self) -> bool:
-        """Check if a metric value has been set.
-
-        Returns:
-            True if value exists, False otherwise
-        """
+        """Check if a metric value has been set."""
         with self._lock:
             return self._value is not None
 
@@ -82,5 +298,8 @@ class MetricStore:
         """Reset the metric store to initial state."""
         with self._lock:
             self._value = None
+            self._payload = None
             self._timestamp = None
+            self._selected_field = None
+            self._history.clear()
             logger.info("Metric store reset")

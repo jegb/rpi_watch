@@ -33,6 +33,36 @@ def save_test_image(image: Image.Image, filename: str):
     logger.info(f"✓ Saved: {filename}")
 
 
+def test_metric_renderer():
+    """Test the main metric renderer and log the resolved font."""
+    logger.info("\n" + "=" * 70)
+    logger.info("TEST 0: Metric Renderer Font Diagnostics")
+    logger.info("=" * 70)
+
+    renderer = MetricRenderer(width=240, height=240, font_size=116, unit_font_size=30)
+    logger.info(
+        "MetricRenderer font: resolved=%s scalable=%s",
+        renderer.resolved_font_source,
+        renderer.using_scalable_font,
+    )
+
+    samples = [
+        (10.5, 1, "µg/m³", "/tmp/test_metric_pm25.png"),
+        (27.1, 1, "°C", "/tmp/test_metric_temp.png"),
+        (47.8, 1, "%", "/tmp/test_metric_humidity.png"),
+    ]
+
+    for value, decimal_places, unit_label, filename in samples:
+        image = renderer.render_and_mask(
+            value=value,
+            decimal_places=decimal_places,
+            unit_label=unit_label,
+        )
+        save_test_image(image, filename)
+
+    logger.info("✓ Metric renderer font diagnostics passed")
+
+
 def test_text_rendering():
     """Test text rendering with different sizes."""
     logger.info("\n" + "=" * 70)
@@ -40,6 +70,7 @@ def test_text_rendering():
     logger.info("=" * 70)
 
     renderer = TextRenderer(width=240, height=240)
+    logger.info("TextRenderer font: resolved=%s", renderer.resolved_font_source)
 
     # Test different sizes
     sizes = [TextSize.XL, TextSize.LARGE, TextSize.NORMAL, TextSize.SMALL, TextSize.TINY]
@@ -262,6 +293,7 @@ def main():
         logger.info("GC9A01 Display - Component Testing Suite")
         logger.info("=" * 70)
 
+        test_metric_renderer()
         test_text_rendering()
         test_multiline_text()
         test_circular_gauge()

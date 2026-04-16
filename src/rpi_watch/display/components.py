@@ -12,6 +12,8 @@ from enum import Enum
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .fonts import load_font
+
 logger = logging.getLogger(__name__)
 
 
@@ -53,42 +55,35 @@ class TextRenderer:
         self.height = height
         self.default_font_size = default_font_size
         self.font_path = font_path
+        self.resolved_font_source = None
 
         # Load font with fallback
         self.font = self._load_font(font_path, default_font_size)
         self.fonts = {}  # Cache for different sizes
 
-        logger.info(f"TextRenderer initialized: {width}x{height}")
+        logger.info(
+            f"TextRenderer initialized: {width}x{height}, "
+            f"font_path={font_path}, resolved_font={self.resolved_font_source}"
+        )
 
     def _load_font(self, font_path: Optional[str], font_size: int) -> ImageFont.FreeTypeFont:
         """Load TrueType font with fallback."""
-        if font_path is None:
-            # Try common fonts
-            candidates = [
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
-                "/System/Library/Fonts/Helvetica.ttc",
-                "C:\\Windows\\Fonts\\arial.ttf",
-            ]
-            for candidate in candidates:
-                try:
-                    return ImageFont.truetype(candidate, font_size)
-                except:
-                    continue
-
-        if font_path:
-            try:
-                return ImageFont.truetype(font_path, font_size)
-            except:
-                logger.warning(f"Could not load font {font_path}, using default")
-
-        return ImageFont.load_default()
+        font, resolved_source, _ = load_font(font_path, font_size)
+        if resolved_source and self.resolved_font_source is None:
+            self.resolved_font_source = resolved_source
+        return font
 
     def _get_font(self, size: int) -> ImageFont.FreeTypeFont:
         """Get or load font at specific size."""
         if size not in self.fonts:
             self.fonts[size] = self._load_font(self.font_path, size)
         return self.fonts[size]
+
+    def get_font(self, size: int | TextSize) -> ImageFont.FreeTypeFont:
+        """Get a font for a requested size or preset."""
+        if isinstance(size, TextSize):
+            return self._get_font(size.value)
+        return self._get_font(size)
 
     def render_text(
         self,
@@ -227,6 +222,8 @@ class CircularGauge:
         center_x: Optional[int] = None,
         center_y: Optional[int] = None,
         outer_radius: int = 110,
+        font_path: Optional[str] = None,
+        value_font_size: int = 28,
     ):
         """Initialize circular gauge.
 
@@ -242,8 +239,18 @@ class CircularGauge:
         self.center_x = center_x if center_x else width // 2
         self.center_y = center_y if center_y else height // 2
         self.outer_radius = outer_radius
+        self.font_path = font_path
+        self.value_font_size = value_font_size
+        self._font_cache = {}
 
         logger.info(f"CircularGauge initialized: {width}x{height}, radius={outer_radius}")
+
+    def _get_font(self, size: int) -> ImageFont.FreeTypeFont:
+        """Get or load a gauge label font."""
+        if size not in self._font_cache:
+            font, _, _ = load_font(self.font_path, size)
+            self._font_cache[size] = font
+        return self._font_cache[size]
 
     def render_gauge(
         self,
@@ -337,7 +344,7 @@ class CircularGauge:
         # Show value text in center
         if show_value:
             value_text = f"{value:.1f}"
-            font = ImageFont.load_default()
+            font = self._get_font(self.value_font_size)
             bbox = draw.textbbox((0, 0), value_text, font=font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
@@ -537,10 +544,26 @@ class CircularGauge:
 class ProgressBar:
     """Renders linear and circular progress indicators."""
 
-    def __init__(self, width: int = 240, height: int = 240):
+    def __init__(
+        self,
+        width: int = 240,
+        height: int = 240,
+        font_path: Optional[str] = None,
+        label_font_size: int = 24,
+    ):
         """Initialize progress bar renderer."""
         self.width = width
         self.height = height
+        self.font_path = font_path
+        self.label_font_size = label_font_size
+        self._font_cache = {}
+
+    def _get_font(self, size: int) -> ImageFont.FreeTypeFont:
+        """Get or load a progress label font."""
+        if size not in self._font_cache:
+            font, _, _ = load_font(self.font_path, size)
+            self._font_cache[size] = font
+        return self._font_cache[size]
 
     def render_linear_progress(
         self,
@@ -594,7 +617,7 @@ class ProgressBar:
         # Percentage text
         if show_percentage:
             pct_text = f"{(percentage * 100):.0f}%"
-            font = ImageFont.load_default()
+            font = self._get_font(self.label_font_size)
             bbox = draw.textbbox((0, 0), pct_text, font=font)
             text_width = bbox[2] - bbox[0]
             text_x = (self.width - text_width) // 2

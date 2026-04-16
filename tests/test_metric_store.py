@@ -29,6 +29,17 @@ class TestMetricStore(unittest.TestCase):
         self.assertEqual(store.get_latest(), 42.5)
         self.assertTrue(store.has_value())
 
+    def test_initialization_with_payload(self):
+        """Test store initialization with initial payload."""
+        store = MetricStore(initial_payload={"pm_2_5": "42.5", "status": "ok"})
+        self.assertEqual(store.get_payload(), {"pm_2_5": 42.5, "status": "ok"})
+        self.assertEqual(store.get_latest(), 42.5)
+        self.assertEqual(store.get_selected_field(), "pm_2_5")
+        history = store.get_history()
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["value"], 42.5)
+        self.assertEqual(history[0]["field"], "pm_2_5")
+
     def test_update_value(self):
         """Test updating metric value."""
         self.store.update(23.5)
@@ -83,6 +94,106 @@ class TestMetricStore(unittest.TestCase):
         self.store.update(42.5)
         self.assertTrue(self.store.has_value())
 
+    def test_update_payload_selects_preferred_field(self):
+        """Test payload update with preferred field selection."""
+        field, value = self.store.update_payload(
+            {"temp": "27.1", "pm_2_5": "8.0", "status": "ok"},
+            preferred_field="pm_2_5",
+        )
+        self.assertEqual(field, "pm_2_5")
+        self.assertEqual(value, 8.0)
+        self.assertEqual(self.store.get_latest(), 8.0)
+        self.assertEqual(self.store.get_selected_field(), "pm_2_5")
+        self.assertEqual(
+            self.store.get_payload(),
+            {"temp": 27.1, "pm_2_5": 8.0, "status": "ok"},
+        )
+
+    def test_update_payload_falls_back_to_first_numeric_field(self):
+        """Test payload update falls back when no preferred field is available."""
+        field, value = self.store.update_payload(
+            {"temp": "27.1", "humidity": "47.8"},
+            preferred_field="pm_2_5",
+        )
+        self.assertEqual(field, "temp")
+        self.assertEqual(value, 27.1)
+
+    def test_get_numeric_payload(self):
+        """Test numeric payload extraction."""
+        self.store.update_payload({"temp": "27.1", "humidity": 47.8, "status": "ok"})
+        self.assertEqual(
+            self.store.get_numeric_payload(),
+            {"temp": 27.1, "humidity": 47.8},
+        )
+
+    def test_history_keeps_last_n_entries(self):
+        """Test bounded history rollover."""
+        store = MetricStore(history_size=3)
+        for value in (1.0, 2.0, 3.0, 4.0, 5.0):
+            store.update(value)
+
+        history = store.get_history()
+        self.assertEqual(len(history), 3)
+        self.assertEqual([entry["value"] for entry in history], [3.0, 4.0, 5.0])
+
+    def test_get_history_limit_returns_latest_entries(self):
+        """Test limiting returned history entries."""
+        for value in (1.0, 2.0, 3.0, 4.0):
+            self.store.update(value)
+
+        history = self.store.get_history(limit=2)
+        self.assertEqual([entry["value"] for entry in history], [3.0, 4.0])
+
+    def test_get_field_history(self):
+        """Test extracting a field-specific history series."""
+        self.store.update_payload(
+            {"temp": "27.1", "pm_2_5": "8.0"},
+            timestamp=100.0,
+            preferred_field="pm_2_5",
+        )
+        self.store.update_payload(
+            {"temp": "26.8", "humidity": "47.8"},
+            timestamp=101.0,
+            preferred_field="pm_2_5",
+        )
+        self.store.update_payload(
+            {"temp": "26.4", "pm_2_5": "7.4"},
+            timestamp=102.0,
+            preferred_field="pm_2_5",
+        )
+
+        self.assertEqual(
+            self.store.get_field_history("pm_2_5"),
+            [(100.0, 8.0), (102.0, 7.4)],
+        )
+        self.assertEqual(
+            self.store.get_field_history("temp", limit=2),
+            [(101.0, 26.8), (102.0, 26.4)],
+        )
+
+    def test_scalar_updates_record_history_without_payload(self):
+        """Test scalar-only updates still produce history entries."""
+        self.store.update(42.5, timestamp=123.0)
+        history = self.store.get_history()
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["value"], 42.5)
+        self.assertIsNone(history[0]["payload"])
+        self.assertIsNone(history[0]["field"])
+
+    def test_get_field(self):
+        """Test getting a specific field from payload."""
+        self.store.update_payload({"temp": "27.1", "humidity": 47.8})
+        self.assertEqual(self.store.get_field("temp"), 27.1)
+        self.assertEqual(self.store.get_field("humidity"), 47.8)
+        self.assertIsNone(self.store.get_field("pm_2_5"))
+
+    def test_select_numeric_field_prefers_previous_field(self):
+        """Test field selection reuses prior field when possible."""
+        self.store.update_payload({"temp": 27.1, "pm_2_5": 8.0}, preferred_field="pm_2_5")
+        field, value = self.store.update_payload({"temp": 26.8, "pm_2_5": 7.4})
+        self.assertEqual(field, "pm_2_5")
+        self.assertEqual(value, 7.4)
+
     def test_reset(self):
         """Test resetting the store."""
         self.store.update(42.5)
@@ -91,6 +202,9 @@ class TestMetricStore(unittest.TestCase):
         self.store.reset()
         self.assertFalse(self.store.has_value())
         self.assertIsNone(self.store.get_latest())
+        self.assertIsNone(self.store.get_payload())
+        self.assertIsNone(self.store.get_selected_field())
+        self.assertEqual(self.store.get_history(), [])
 
     def test_multiple_updates(self):
         """Test multiple sequential updates."""
