@@ -578,18 +578,46 @@ class RPiWatch:
                     layout_mode = self._get_layout_mode()
                     selected_metric = None
 
-                    if layout_mode == 'pm_bars' and current_payload:
-                        pm_snapshot = tuple(
-                            self.metric_store.get_field(field_name) or 0.0
-                            for field_name in ('pm_1_0', 'pm_2_5', 'pm_4_0', 'pm_10_0')
-                        )
-                        render_state = ('pm_bars', pm_snapshot)
+                    if layout_mode == 'pm_bars':
+                        if current_payload:
+                            pm_snapshot = tuple(
+                                self.metric_store.get_field(field_name) or 0.0
+                                for field_name in ('pm_1_0', 'pm_2_5', 'pm_4_0', 'pm_10_0')
+                            )
+                            render_state = ('pm_bars', pm_snapshot)
 
-                        if render_state != last_render_state:
-                            self._display_pm_bars(current_payload)
-                            last_render_state = render_state
-                            frame_count += 1
-                            logger.debug("Display updated (frame %s): pm_bars=%s", frame_count, pm_snapshot)
+                            if render_state != last_render_state:
+                                self._display_pm_bars(current_payload)
+                                last_render_state = render_state
+                                frame_count += 1
+                                logger.debug("Display updated (frame %s): pm_bars=%s", frame_count, pm_snapshot)
+                        elif placeholder_metric is not None:
+                            render_state = (
+                                'placeholder',
+                                placeholder_metric['text'],
+                                placeholder_metric['title_label'],
+                                placeholder_metric['unit_label'],
+                            )
+
+                            if render_state != last_render_state:
+                                logger.info(
+                                    "Displaying placeholder metric until first MQTT update: %s",
+                                    placeholder_metric['text'],
+                                )
+                                self._display_metric_value(
+                                    placeholder_metric['text'],
+                                    decimal_places=metric_config.get('decimal_places', 1),
+                                    title_label=placeholder_metric['title_label'],
+                                    unit_label=placeholder_metric['unit_label'],
+                                )
+                                last_render_state = render_state
+                        else:
+                            render_state = ('waiting',)
+                            if render_state != last_render_state:
+                                logger.info("Waiting for MQTT metric...")
+                                self._display_waiting()
+                                last_render_state = render_state
+
                     elif layout_mode == 'metric_ring':
                         ring_metric = self._select_ring_metric(
                             current_payload,
@@ -643,90 +671,89 @@ class RPiWatch:
                             current_payload,
                             current_time=loop_time,
                         )
-
-                    if layout_mode == 'single_metric' and selected_metric is not None:
-                        sparkline_series = self._get_history_tail(selected_metric['field'])
-                        sparkline_state = tuple(round(value, 3) for _, value in sparkline_series)
-                        render_state = (
-                            'metric',
-                            selected_metric['field'],
-                            selected_metric['value'],
-                            selected_metric['decimal_places'],
-                            selected_metric['title_label'],
-                            selected_metric['unit_label'],
-                            selected_metric.get('value_color'),
-                            sparkline_state,
-                        )
-
-                        # Only update display if value changed (reduces SPI traffic)
-                        if render_state != last_render_state:
-                            self._display_metric_value(
+                        if selected_metric is not None:
+                            sparkline_series = self._get_history_tail(selected_metric['field'])
+                            sparkline_state = tuple(round(value, 3) for _, value in sparkline_series)
+                            render_state = (
+                                'metric',
+                                selected_metric['field'],
                                 selected_metric['value'],
-                                decimal_places=selected_metric['decimal_places'],
-                                title_label=selected_metric['title_label'],
-                                unit_label=selected_metric['unit_label'],
-                                sparkline_values=sparkline_series,
-                                value_color=selected_metric.get('value_color'),
+                                selected_metric['decimal_places'],
+                                selected_metric['title_label'],
+                                selected_metric['unit_label'],
+                                selected_metric.get('value_color'),
+                                sparkline_state,
                             )
-                            last_render_state = render_state
-                            frame_count += 1
-                            logger.debug(
-                                f"Display updated (frame {frame_count}): "
-                                f"{selected_metric['field']}={selected_metric['value']}"
-                            )
-                    elif current_value is not None:
-                        display_metadata = self._get_display_metadata(self._get_preferred_metric_field())
-                        sparkline_field = display_metadata['field'] or self._get_preferred_metric_field() or 'value'
-                        sparkline_series = self._get_history_tail(sparkline_field)
-                        sparkline_state = tuple(round(value, 3) for _, value in sparkline_series)
-                        render_state = (
-                            'scalar',
-                            current_value,
-                            display_metadata['decimal_places'],
-                            display_metadata['title_label'],
-                            display_metadata['unit_label'],
-                            self._get_metric_value_color(display_metadata['field'], current_payload),
-                            sparkline_state,
-                        )
 
-                        if render_state != last_render_state:
-                            self._display_metric_value(
+                            # Only update display if value changed (reduces SPI traffic)
+                            if render_state != last_render_state:
+                                self._display_metric_value(
+                                    selected_metric['value'],
+                                    decimal_places=selected_metric['decimal_places'],
+                                    title_label=selected_metric['title_label'],
+                                    unit_label=selected_metric['unit_label'],
+                                    sparkline_values=sparkline_series,
+                                    value_color=selected_metric.get('value_color'),
+                                )
+                                last_render_state = render_state
+                                frame_count += 1
+                                logger.debug(
+                                    f"Display updated (frame {frame_count}): "
+                                    f"{selected_metric['field']}={selected_metric['value']}"
+                                )
+                        elif current_value is not None:
+                            display_metadata = self._get_display_metadata(self._get_preferred_metric_field())
+                            sparkline_field = display_metadata['field'] or self._get_preferred_metric_field() or 'value'
+                            sparkline_series = self._get_history_tail(sparkline_field)
+                            sparkline_state = tuple(round(value, 3) for _, value in sparkline_series)
+                            render_state = (
+                                'scalar',
                                 current_value,
-                                decimal_places=display_metadata['decimal_places'],
-                                title_label=display_metadata['title_label'],
-                                unit_label=display_metadata['unit_label'],
-                                sparkline_values=sparkline_series,
-                                value_color=self._get_metric_value_color(display_metadata['field'], current_payload),
+                                display_metadata['decimal_places'],
+                                display_metadata['title_label'],
+                                display_metadata['unit_label'],
+                                self._get_metric_value_color(display_metadata['field'], current_payload),
+                                sparkline_state,
                             )
-                            last_render_state = render_state
-                            frame_count += 1
-                            logger.debug(f"Display updated (frame {frame_count}): {current_value}")
-                    elif placeholder_metric is not None:
-                        render_state = (
-                            'placeholder',
-                            placeholder_metric['text'],
-                            placeholder_metric['title_label'],
-                            placeholder_metric['unit_label'],
-                        )
 
-                        if render_state != last_render_state:
-                            logger.info(
-                                "Displaying placeholder metric until first MQTT update: %s",
+                            if render_state != last_render_state:
+                                self._display_metric_value(
+                                    current_value,
+                                    decimal_places=display_metadata['decimal_places'],
+                                    title_label=display_metadata['title_label'],
+                                    unit_label=display_metadata['unit_label'],
+                                    sparkline_values=sparkline_series,
+                                    value_color=self._get_metric_value_color(display_metadata['field'], current_payload),
+                                )
+                                last_render_state = render_state
+                                frame_count += 1
+                                logger.debug(f"Display updated (frame {frame_count}): {current_value}")
+                        elif placeholder_metric is not None:
+                            render_state = (
+                                'placeholder',
                                 placeholder_metric['text'],
+                                placeholder_metric['title_label'],
+                                placeholder_metric['unit_label'],
                             )
-                            self._display_metric_value(
-                                placeholder_metric['text'],
-                                decimal_places=metric_config.get('decimal_places', 1),
-                                title_label=placeholder_metric['title_label'],
-                                unit_label=placeholder_metric['unit_label'],
-                            )
-                            last_render_state = render_state
-                    else:
-                        render_state = ('waiting',)
-                        if render_state != last_render_state:
-                            logger.info("Waiting for MQTT metric...")
-                            self._display_waiting()
-                            last_render_state = render_state
+
+                            if render_state != last_render_state:
+                                logger.info(
+                                    "Displaying placeholder metric until first MQTT update: %s",
+                                    placeholder_metric['text'],
+                                )
+                                self._display_metric_value(
+                                    placeholder_metric['text'],
+                                    decimal_places=metric_config.get('decimal_places', 1),
+                                    title_label=placeholder_metric['title_label'],
+                                    unit_label=placeholder_metric['unit_label'],
+                                )
+                                last_render_state = render_state
+                        else:
+                            render_state = ('waiting',)
+                            if render_state != last_render_state:
+                                logger.info("Waiting for MQTT metric...")
+                                self._display_waiting()
+                                last_render_state = render_state
 
                     # Sleep for frame time
                     time.sleep(frame_time)

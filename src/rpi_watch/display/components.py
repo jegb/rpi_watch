@@ -803,6 +803,8 @@ class CircularGauge:
         color: Tuple[int, int, int],
         width: int,
         rounded_caps: bool = False,
+        round_start_cap: Optional[bool] = None,
+        round_end_cap: Optional[bool] = None,
     ) -> None:
         """Draw an arc segment with optional rounded caps."""
         angle_start, angle_end = self._normalize_arc_angles(angle_start, angle_end)
@@ -823,9 +825,19 @@ class CircularGauge:
         ]
         draw.line(points, fill=color, width=width)
 
-        if rounded_caps:
+        if round_start_cap is None:
+            round_start_cap = rounded_caps
+        if round_end_cap is None:
+            round_end_cap = rounded_caps
+
+        if round_start_cap or round_end_cap:
             cap_radius = max(1, width // 2)
-            for cap_x, cap_y in (points[0], points[-1]):
+            cap_points = []
+            if round_start_cap:
+                cap_points.append(points[0])
+            if round_end_cap:
+                cap_points.append(points[-1])
+            for cap_x, cap_y in cap_points:
                 draw.ellipse(
                     [
                         (cap_x - cap_radius, cap_y - cap_radius),
@@ -1053,7 +1065,7 @@ class CircularGauge:
         show_marker: bool = True,
         marker_fill_color: Tuple[int, int, int] = (255, 255, 255),
         marker_outline_color: Optional[Tuple[int, int, int]] = None,
-        segment_gap_degrees: float = 2.0,
+        segment_gap_degrees: float = 0.0,
     ) -> Image.Image:
         """Render a categorical threshold ring with a visible current-value marker."""
         img = Image.new('RGB', (self.width, self.height), background_color)
@@ -1101,7 +1113,8 @@ class CircularGauge:
                 angle_end=segment_end,
                 color=band["color"],
                 width=thickness,
-                rounded_caps=rounded_caps and (index == 0 or index == len(resolved_bands) - 1),
+                round_start_cap=rounded_caps and index == 0,
+                round_end_cap=rounded_caps and index == len(resolved_bands) - 1,
             )
 
         if show_marker:
