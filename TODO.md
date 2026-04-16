@@ -7,7 +7,7 @@
 - if needed, increase supersampling or move the ring fill to a tighter annular mask pass
 - keep cap treatment consistent:
   outer ends rounded, internal joins clean, marker not overpowering the ring
-- reduce the triangle marker height and keep ring radius visually constant across the sweep
+- keep the ring radius visually constant across the sweep
 - continue reducing text/component overlap as layouts get denser
 
 ### Metric Rotation And Animation
@@ -22,8 +22,6 @@
 - keep a clear split between:
   - live reading shown as the large number
   - 24-hour average used for PM color index / risk banding
-- wire `rpi_watch` to actually consume the MQTT average fields
-  instead of still classifying PM guidance from the raw live values
 - add config for metric source selection per visual:
   raw vs `*_avg_24h` vs `*_day_avg`
 

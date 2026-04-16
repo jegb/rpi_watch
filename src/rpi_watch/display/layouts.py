@@ -1073,6 +1073,9 @@ class MetricRingLayout(DisplayLayout):
         track_color: Optional[Tuple[int, int, int]] = None,
         value_color: Optional[Tuple[int, int, int]] = None,
         show_marker: bool = True,
+        average_reference_value: Optional[float] = None,
+        average_reference_label: str = "",
+        average_reference_color: Optional[Tuple[int, int, int]] = None,
         inner_margin: int = 54,
         title_font_size: int = 20,
         value_font_size: int = 82,
@@ -1082,6 +1085,7 @@ class MetricRingLayout(DisplayLayout):
     ) -> Image.Image:
         """Render a single metric over a configurable ring."""
         track = track_color or self.color_scheme["secondary"]
+        reference_color = average_reference_color or (214, 214, 214)
         if threshold_bands:
             img = self.gauge.render_banded_ring(
                 value,
@@ -1092,8 +1096,10 @@ class MetricRingLayout(DisplayLayout):
                 background_color=self.bg_color,
                 track_color=track,
                 rounded_caps=rounded_caps,
-                show_marker=show_marker,
-                marker_fill_color=(255, 255, 255),
+                show_marker=show_marker and average_reference_value is not None,
+                marker_fill_color=reference_color,
+                marker_value=average_reference_value,
+                marker_style="diamond",
             )
         else:
             img = self.gauge.render_gradient_ring(
@@ -1107,7 +1113,10 @@ class MetricRingLayout(DisplayLayout):
                 background_color=self.bg_color,
                 track_color=track,
                 rounded_caps=rounded_caps,
-                show_marker=show_marker,
+                show_marker=show_marker and average_reference_value is not None,
+                marker_fill_color=reference_color,
+                marker_value=average_reference_value,
+                marker_style="diamond",
             )
         draw = ImageDraw.Draw(img)
 
@@ -1142,6 +1151,17 @@ class MetricRingLayout(DisplayLayout):
             min_size=12,
             max_height=max(14, int(available_height * 0.16)),
         )
+        legend_label = average_reference_label.strip()
+        legend_font = None
+        legend_bbox = None
+        if legend_label:
+            legend_font, legend_bbox = self.text_renderer.fit_font(
+                legend_label,
+                max(10, int(unit_font_size * 0.78)),
+                max_width=available_width,
+                min_size=10,
+                max_height=max(10, int(available_height * 0.12)),
+            )
 
         chosen_value_font = None
         chosen_value_bbox = None
@@ -1159,6 +1179,8 @@ class MetricRingLayout(DisplayLayout):
                 + unit_gap
                 + (unit_bbox[3] - unit_bbox[1])
             )
+            if legend_bbox is not None:
+                total_height += unit_gap + (legend_bbox[3] - legend_bbox[1])
             if total_height <= available_height:
                 chosen_value_font = value_font
                 chosen_value_bbox = value_bbox
@@ -1177,6 +1199,8 @@ class MetricRingLayout(DisplayLayout):
         value_height = chosen_value_bbox[3] - chosen_value_bbox[1]
         unit_height = unit_bbox[3] - unit_bbox[1]
         total_height = title_height + title_gap + value_height + unit_gap + unit_height
+        if legend_bbox is not None:
+            total_height += unit_gap + (legend_bbox[3] - legend_bbox[1])
         current_y = inner_margin + max(0, (available_height - total_height) // 2)
 
         for text, font, bbox, color, gap in (
@@ -1193,6 +1217,17 @@ class MetricRingLayout(DisplayLayout):
                 font=font,
             )
             current_y += (bbox[3] - bbox[1]) + gap
+
+        if legend_font is not None and legend_bbox is not None:
+            current_y += unit_gap
+            legend_width = legend_bbox[2] - legend_bbox[0]
+            legend_x = (self.width - legend_width) // 2
+            draw.text(
+                (legend_x, current_y - legend_bbox[1]),
+                legend_label,
+                fill=reference_color,
+                font=legend_font,
+            )
 
         return img
 

@@ -165,6 +165,8 @@ class MetricRenderer:
         unit_label: str = "",
         sparkline_values: Optional[Sequence[Any]] = None,
         sparkline_color: Optional[Tuple[int, int, int]] = None,
+        sparkline_reference_value: Optional[float] = None,
+        sparkline_reference_color: Optional[Tuple[int, int, int]] = None,
         value_color: Optional[Tuple[int, int, int]] = None,
         label_color: Optional[Tuple[int, int, int]] = None,
     ) -> Image.Image:
@@ -309,6 +311,9 @@ class MetricRenderer:
                 fill_color=fill_color,
                 stroke_width=2,
                 point_radius=2,
+                reference_value=sparkline_reference_value,
+                reference_color=sparkline_reference_color,
+                reference_width=2,
             )
             image.paste(
                 sparkline_image,
@@ -325,6 +330,8 @@ class MetricRenderer:
         unit_label: str = "",
         sparkline_values: Optional[Sequence[Any]] = None,
         sparkline_color: Optional[Tuple[int, int, int]] = None,
+        sparkline_reference_value: Optional[float] = None,
+        sparkline_reference_color: Optional[Tuple[int, int, int]] = None,
         value_color: Optional[Tuple[int, int, int]] = None,
         label_color: Optional[Tuple[int, int, int]] = None,
     ) -> Image.Image:
@@ -353,6 +360,8 @@ class MetricRenderer:
             unit_label=unit_label,
             sparkline_values=sparkline_values,
             sparkline_color=sparkline_color,
+            sparkline_reference_value=sparkline_reference_value,
+            sparkline_reference_color=sparkline_reference_color,
             value_color=value_color,
             label_color=label_color,
         )
@@ -399,6 +408,8 @@ class MetricRenderer:
         unit_label: str = "",
         sparkline_values: Optional[Sequence[Any]] = None,
         sparkline_color: Optional[Tuple[int, int, int]] = None,
+        sparkline_reference_value: Optional[float] = None,
+        sparkline_reference_color: Optional[Tuple[int, int, int]] = None,
         value_color: Optional[Tuple[int, int, int]] = None,
         label_color: Optional[Tuple[int, int, int]] = None,
     ) -> Image.Image:
@@ -420,6 +431,8 @@ class MetricRenderer:
             unit_label=unit_label,
             sparkline_values=sparkline_values,
             sparkline_color=sparkline_color,
+            sparkline_reference_value=sparkline_reference_value,
+            sparkline_reference_color=sparkline_reference_color,
             value_color=value_color,
             label_color=label_color,
         )

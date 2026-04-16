@@ -37,6 +37,8 @@ DEFAULT_FIELD_PRIORITY = (
     'humidity',
 )
 
+AVERAGE_REFERENCE_COLOR = (214, 214, 214)
+
 FIELD_DISPLAY_DEFAULTS = {
     'pm_1_0': {'decimal_places': 1, 'title_label': 'PM1.0', 'unit_label': 'µg/m³'},
     'pm_2_5': {'decimal_places': 1, 'title_label': 'PM2.5', 'unit_label': 'µg/m³'},
@@ -260,10 +262,55 @@ class RPiWatch:
         payload: Optional[dict],
     ) -> Optional[tuple[int, int, int]]:
         """Return an optional PM guidance color for the displayed value."""
-        band = classify_display_band(field_name, payload)
+        band = classify_display_band(field_name, self._get_guidance_payload(payload))
         if band is None:
             return None
         return band.color
+
+    def _get_average_reference(
+        self,
+        field_name: Optional[str],
+        payload: Optional[dict],
+    ) -> Optional[dict]:
+        """Return the preferred average reference value and legend for a field."""
+        if not field_name or not payload:
+            return None
+
+        metric_config = self._get_metric_display_config()
+        reference_color = self._coerce_color(
+            metric_config.get('average_reference_color'),
+            AVERAGE_REFERENCE_COLOR,
+        )
+
+        candidates = (
+            (f"{field_name}_avg_24h", "◆ 24h avg"),
+            (f"{field_name}_day_avg", "◆ daily avg."),
+        )
+        for key, label in candidates:
+            try:
+                numeric_value = float(payload.get(key))
+            except (TypeError, ValueError):
+                continue
+            return {
+                'field': key,
+                'value': numeric_value,
+                'label': label,
+                'color': reference_color,
+            }
+
+        return None
+
+    def _get_guidance_payload(self, payload: Optional[dict]) -> Optional[dict]:
+        """Return a payload variant that prefers average PM values for guidance coloring."""
+        if not payload:
+            return payload
+
+        guidance_payload = dict(payload)
+        for field_name in ('pm_2_5', 'pm_10_0'):
+            average_reference = self._get_average_reference(field_name, payload)
+            if average_reference is not None:
+                guidance_payload[field_name] = average_reference['value']
+        return guidance_payload
 
     def _get_ring_profile(self, field_name: Optional[str]) -> dict:
         """Resolve ring min/max/threshold profile for a field."""
@@ -424,6 +471,8 @@ class RPiWatch:
         title_label: str,
         unit_label: str,
         sparkline_values: Optional[list[tuple[float, float]]] = None,
+        sparkline_reference_value: Optional[float] = None,
+        sparkline_reference_color: Optional[tuple[int, int, int]] = None,
         value_color: Optional[tuple[int, int, int]] = None,
     ) -> None:
         """Render and display a metric or placeholder."""
@@ -438,6 +487,8 @@ class RPiWatch:
                 metric_config.get('sparkline_line_color'),
                 tuple(metric_config.get('text_color', [255, 255, 255])),
             ),
+            sparkline_reference_value=sparkline_reference_value,
+            sparkline_reference_color=sparkline_reference_color,
             value_color=value_color,
             label_color=tuple(metric_config.get('text_color', [255, 255, 255])),
         )
@@ -512,6 +563,7 @@ class RPiWatch:
             'title_label': display_metadata['title_label'],
             'unit_label': display_metadata['unit_label'],
             'value_color': self._get_metric_value_color(field_name, payload) if guidance_bands else None,
+            'average_reference': self._get_average_reference(field_name, payload),
             'guidance_bands': serialize_guidance_bands(field_name) if guidance_bands else None,
             'guidance_range': guidance_range,
             'ring_min_value': ring_profile['min_value'],
@@ -523,6 +575,7 @@ class RPiWatch:
         """Render a threshold-colored ring layout."""
         metric_config = self._get_metric_display_config()
         guidance_range = metric.get('guidance_range')
+        average_reference = metric.get('average_reference') or {}
         ring_min_value = guidance_range[0] if guidance_range is not None else float(metric.get('ring_min_value', metric_config.get('ring_min_value', 0.0)))
         ring_max_value = guidance_range[1] if guidance_range is not None else float(metric.get('ring_max_value', metric_config.get('ring_max_value', 40.0)))
         image = self.metric_ring_layout.render(
@@ -544,6 +597,9 @@ class RPiWatch:
             ),
             value_color=metric.get('value_color'),
             show_marker=True,
+            average_reference_value=average_reference.get('value'),
+            average_reference_label=average_reference.get('label', ''),
+            average_reference_color=average_reference.get('color'),
             inner_margin=int(metric_config.get('ring_inner_margin', 54)),
             title_font_size=int(metric_config.get('ring_title_font_size', 20)),
             value_font_size=int(metric_config.get('ring_value_font_size', 82)),
@@ -593,6 +649,7 @@ class RPiWatch:
             'decimal_places': display_metadata['decimal_places'],
             'title_label': display_metadata['title_label'],
             'unit_label': display_metadata['unit_label'],
+            'average_reference': self._get_average_reference(field_name, payload),
             'value_color': self._get_metric_value_color(field_name, payload),
         }
 
@@ -699,6 +756,8 @@ class RPiWatch:
                                 ring_metric['title_label'],
                                 ring_metric['unit_label'],
                                 ring_metric.get('value_color'),
+                                round((ring_metric.get('average_reference') or {}).get('value', -1.0), 3),
+                                (ring_metric.get('average_reference') or {}).get('label', ''),
                             )
 
                             if render_state != last_render_state:
@@ -747,6 +806,7 @@ class RPiWatch:
                                 selected_metric['title_label'],
                                 selected_metric['unit_label'],
                                 selected_metric.get('value_color'),
+                                round((selected_metric.get('average_reference') or {}).get('value', -1.0), 3),
                                 sparkline_state,
                             )
 
@@ -758,6 +818,8 @@ class RPiWatch:
                                     title_label=selected_metric['title_label'],
                                     unit_label=selected_metric['unit_label'],
                                     sparkline_values=sparkline_series,
+                                    sparkline_reference_value=(selected_metric.get('average_reference') or {}).get('value'),
+                                    sparkline_reference_color=(selected_metric.get('average_reference') or {}).get('color'),
                                     value_color=selected_metric.get('value_color'),
                                 )
                                 last_render_state = render_state
