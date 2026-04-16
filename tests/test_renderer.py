@@ -22,7 +22,9 @@ class TestMetricRenderer(unittest.TestCase):
         self.assertEqual(self.renderer.width, 240)
         self.assertEqual(self.renderer.height, 240)
         self.assertEqual(self.renderer.font_size, 80)
+        self.assertGreaterEqual(self.renderer.unit_font_size, 24)
         self.assertIsNotNone(self.renderer.font)
+        self.assertIsNotNone(self.renderer.unit_font)
         self.assertIsNotNone(self.renderer.circular_mask)
 
     def test_render_metric_returns_image(self):
@@ -49,6 +51,12 @@ class TestMetricRenderer(unittest.TestCase):
     def test_render_metric_with_unit(self):
         """Test rendering metric with unit label."""
         image = self.renderer.render_metric(23.5, decimal_places=1, unit_label="°C")
+        self.assertIsInstance(image, Image.Image)
+        self.assertEqual(image.size, (240, 240))
+
+    def test_render_metric_with_microgram_unit(self):
+        """Test rendering particulate concentration with Unicode unit label."""
+        image = self.renderer.render_metric(23.5, decimal_places=1, unit_label="µg/m³")
         self.assertIsInstance(image, Image.Image)
         self.assertEqual(image.size, (240, 240))
 
@@ -106,6 +114,8 @@ class TestMetricRenderer(unittest.TestCase):
         """Test rendering with custom colors."""
         renderer = MetricRenderer(
             width=240, height=240,
+            font_size=96,
+            unit_font_size=28,
             text_color=(0, 255, 0),  # Green
             background_color=(0, 0, 255)  # Blue
         )
@@ -113,6 +123,7 @@ class TestMetricRenderer(unittest.TestCase):
         image = renderer.render_metric(42.0)
         self.assertIsInstance(image, Image.Image)
         self.assertEqual(image.mode, 'RGB')
+        self.assertEqual(renderer.unit_font_size, 28)
 
     def test_mask_is_circular(self):
         """Test that mask creates approximately circular shape."""

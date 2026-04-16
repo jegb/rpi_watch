@@ -28,9 +28,15 @@ mqtt:
 
 metric_display:
   decimal_places: 1
-  font_size: 80              # Adjust for number visibility (40-100 range typical)
-  font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
-  unit_label: "µm"           # PM2.5 in µg/m³ (or change to "°C" for temperature, "%" for humidity)
+  font_size: 116             # Large centered numeric display; renderer auto-fits wider values
+  unit_font_size: 30         # Separate unit label below the number
+  font_path: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+  unit_label: "µg/m³"        # PM2.5 concentration in micrograms per cubic meter
+  padding: 18                # Horizontal margin used by font auto-fit
+  unit_gap: 6                # Vertical gap between number and unit line
+  show_demo_value: true      # Show a visible placeholder metric until the first MQTT value arrives
+  demo_value: 42.0           # Placeholder metric for bring-up/debug when MQTT is offline or silent
+  demo_decimal_places: 1     # Optional separate formatting for the placeholder metric
   text_color: [255, 255, 255]    # RGB white
   background_color: [0, 0, 0]    # RGB black
 

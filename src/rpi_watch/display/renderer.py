@@ -22,8 +22,11 @@ class MetricRenderer:
         height: int = 240,
         font_path: Optional[str] = None,
         font_size: int = 80,
+        unit_font_size: Optional[int] = None,
         text_color: Tuple[int, int, int] = (255, 255, 255),
         background_color: Tuple[int, int, int] = (0, 0, 0),
+        padding: int = 18,
+        unit_gap: int = 6,
     ):
         """Initialize the renderer.
 
@@ -37,20 +40,49 @@ class MetricRenderer:
         """
         self.width = width
         self.height = height
+        self.font_path = font_path
         self.font_size = font_size
+        self.unit_font_size = unit_font_size or max(24, int(font_size * 0.30))
         self.text_color = text_color
         self.background_color = background_color
+        self.padding = padding
+        self.unit_gap = unit_gap
+        self._font_cache = {}
 
         # Initialize font
         self.font = self._load_font(font_path, font_size)
+        self.unit_font = self._load_font(font_path, self.unit_font_size)
 
         # Pre-compute circular mask once for efficiency
         self.circular_mask = self._create_circular_mask()
 
         logger.info(
             f"MetricRenderer initialized: {width}x{height}, "
-            f"font_size={font_size}, font_path={font_path}"
+            f"font_size={font_size}, unit_font_size={self.unit_font_size}, "
+            f"font_path={font_path}"
         )
+
+    def _font_candidates(self, font_path: Optional[str]) -> list[str]:
+        """Return ordered font candidates for this system."""
+        candidates = []
+        if font_path:
+            candidates.append(font_path)
+
+        candidates.extend([
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",  # macOS
+            "C:\\Windows\\Fonts\\arialbd.ttf",  # Windows fallback
+            "C:\\Windows\\Fonts\\arial.ttf",
+        ])
+
+        deduped = []
+        for candidate in candidates:
+            if candidate not in deduped:
+                deduped.append(candidate)
+        return deduped
 
     def _load_font(self, font_path: Optional[str], font_size: int) -> ImageFont.FreeTypeFont:
         """Load a TrueType font.
@@ -62,29 +94,42 @@ class MetricRenderer:
         Returns:
             Loaded ImageFont object
         """
-        if font_path is None:
-            # Try common default fonts
-            default_fonts = [
-                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
-                "/System/Library/Fonts/Helvetica.ttc",  # macOS
-                "C:\\Windows\\Fonts\\arial.ttf",  # Windows fallback
-            ]
-            for font_candidate in default_fonts:
-                try:
-                    return ImageFont.truetype(font_candidate, font_size)
-                except (IOError, OSError):
-                    continue
-            # Fallback to default font
-            logger.warning("No TrueType font found, using default font (may be limited)")
-            return ImageFont.load_default()
+        cache_key = (font_path, font_size)
+        if cache_key in self._font_cache:
+            return self._font_cache[cache_key]
 
-        try:
-            font_obj = ImageFont.truetype(font_path, font_size)
-            logger.info(f"Loaded font: {font_path}")
-            return font_obj
-        except (IOError, OSError) as e:
-            logger.warning(f"Failed to load font {font_path}: {e}. Using default.")
-            return ImageFont.load_default()
+        for font_candidate in self._font_candidates(font_path):
+            try:
+                font_obj = ImageFont.truetype(font_candidate, font_size)
+                self._font_cache[cache_key] = font_obj
+                logger.debug(f"Loaded font: {font_candidate}")
+                return font_obj
+            except (IOError, OSError):
+                continue
+
+        logger.warning("No TrueType font found, using default font (may be limited)")
+        fallback_font = ImageFont.load_default()
+        self._font_cache[cache_key] = fallback_font
+        return fallback_font
+
+    def _fit_font(
+        self,
+        text: str,
+        base_size: int,
+        max_width: int,
+        min_size: int,
+    ) -> ImageFont.FreeTypeFont:
+        """Reduce font size until text fits the requested width."""
+        scratch = Image.new('RGB', (self.width, self.height), self.background_color)
+        draw = ImageDraw.Draw(scratch)
+
+        for size in range(base_size, min_size - 1, -2):
+            font = self._load_font(self.font_path, size)
+            bbox = draw.textbbox((0, 0), text, font=font)
+            if (bbox[2] - bbox[0]) <= max_width:
+                return font
+
+        return self._load_font(self.font_path, min_size)
 
     def _create_circular_mask(self) -> Image.Image:
         """Create a circular mask for the round display.
@@ -134,28 +179,50 @@ class MetricRenderer:
         else:
             formatted_value = str(int(value))
 
-        if unit_label:
-            text = f"{formatted_value}{unit_label}"
-        else:
-            text = formatted_value
-
         # Create base image with background color
         image = Image.new('RGB', (self.width, self.height), self.background_color)
         draw = ImageDraw.Draw(image)
 
-        # Measure text bounding box to center it
-        bbox = draw.textbbox((0, 0), text, font=self.font)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
+        max_text_width = self.width - (self.padding * 2)
+        value_font = self._fit_font(
+            formatted_value,
+            self.font_size,
+            max_width=max_text_width,
+            min_size=max(42, int(self.font_size * 0.60)),
+        )
+        value_bbox = draw.textbbox((0, 0), formatted_value, font=value_font)
+        value_width = value_bbox[2] - value_bbox[0]
+        value_height = value_bbox[3] - value_bbox[1]
 
-        # Center text on image
-        text_x = (self.width - text_width) // 2
-        text_y = (self.height - text_height) // 2
+        if unit_label:
+            unit_font = self._fit_font(
+                unit_label,
+                self.unit_font_size,
+                max_width=max_text_width,
+                min_size=max(18, int(self.unit_font_size * 0.75)),
+            )
+            unit_bbox = draw.textbbox((0, 0), unit_label, font=unit_font)
+            unit_width = unit_bbox[2] - unit_bbox[0]
+            unit_height = unit_bbox[3] - unit_bbox[1]
 
-        # Draw text
-        draw.text((text_x, text_y), text, fill=self.text_color, font=self.font)
+            total_height = value_height + self.unit_gap + unit_height
+            group_top = (self.height - total_height) // 2 - 8
 
-        logger.debug(f"Rendered metric: value={value}, text='{text}'")
+            value_x = (self.width - value_width) // 2
+            value_y = group_top
+            unit_x = (self.width - unit_width) // 2
+            unit_y = value_y + value_height + self.unit_gap
+
+            draw.text((value_x, value_y), formatted_value, fill=self.text_color, font=value_font)
+            draw.text((unit_x, unit_y), unit_label, fill=self.text_color, font=unit_font)
+        else:
+            text_x = (self.width - value_width) // 2
+            text_y = (self.height - value_height) // 2
+            draw.text((text_x, text_y), formatted_value, fill=self.text_color, font=value_font)
+
+        logger.debug(
+            f"Rendered metric: value={value}, text='{formatted_value}', unit='{unit_label}'"
+        )
 
         return image
 

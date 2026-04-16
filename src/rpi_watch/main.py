@@ -97,8 +97,11 @@ class RPiWatch:
                 height=display_config.get('height', 240),
                 font_path=metric_config.get('font_path'),
                 font_size=metric_config.get('font_size', 80),
+                unit_font_size=metric_config.get('unit_font_size'),
                 text_color=tuple(metric_config.get('text_color', [255, 255, 255])),
-                background_color=tuple(metric_config.get('background_color', [0, 0, 0]))
+                background_color=tuple(metric_config.get('background_color', [0, 0, 0])),
+                padding=metric_config.get('padding', 18),
+                unit_gap=metric_config.get('unit_gap', 6),
             )
 
             # Initialize MQTT subscriber
@@ -120,6 +123,52 @@ class RPiWatch:
             self.cleanup()
             raise
 
+    def _get_metric_display_config(self) -> dict:
+        """Return metric display configuration."""
+        return self.config.get('metric_display', {})
+
+    def _get_demo_metric(self) -> Optional[dict]:
+        """Return demo metric settings when configured.
+
+        Demo rendering is kept outside MetricStore so a real MQTT value can
+        replace it immediately without pretending the fake value was received.
+        """
+        metric_config = self._get_metric_display_config()
+        demo_value = metric_config.get('demo_value')
+
+        if demo_value is None or metric_config.get('show_demo_value', True) is False:
+            return None
+
+        try:
+            return {
+                'value': float(demo_value),
+                'decimal_places': metric_config.get(
+                    'demo_decimal_places',
+                    metric_config.get('decimal_places', 1),
+                ),
+                'unit_label': metric_config.get(
+                    'demo_unit_label',
+                    metric_config.get('unit_label', ''),
+                ),
+            }
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid demo_value in config: {demo_value!r}")
+            return None
+
+    def _display_metric_value(
+        self,
+        value: float,
+        decimal_places: int,
+        unit_label: str,
+    ) -> None:
+        """Render and display a numeric metric."""
+        image = self.renderer.render_and_mask(
+            value,
+            decimal_places=decimal_places,
+            unit_label=unit_label,
+        )
+        self.display.display(image)
+
     def run(self) -> None:
         """Run the main event loop.
 
@@ -140,24 +189,24 @@ class RPiWatch:
             except TimeoutError:
                 logger.warning("⚠ MQTT broker timeout - running in offline mode")
                 logger.warning("  App will display metrics if manually updated")
-                logger.warning("  To use MQTT: verify broker is running at {self.mqtt_subscriber.broker_host}:{self.mqtt_subscriber.broker_port}")
+                logger.warning(
+                    f"  To use MQTT: verify broker is running at "
+                    f"{self.mqtt_subscriber.broker_host}:{self.mqtt_subscriber.broker_port}"
+                )
             except Exception as e:
                 logger.warning(f"⚠ Failed to connect to MQTT broker: {e}")
                 logger.warning("  Running in offline mode - display ready for test data")
 
             # Get configuration
             display_config = self.config.get('display', {})
-            metric_config = self.config.get('metric_display', {})
+            metric_config = self._get_metric_display_config()
+            demo_metric = self._get_demo_metric()
             refresh_rate = display_config.get('refresh_rate_hz', 2)
             frame_time = 1.0 / refresh_rate
 
-            # Initial display showing waiting state
-            self._display_waiting()
-            time.sleep(2)
-
             # Main event loop
             frame_count = 0
-            last_value = None
+            last_render_state = None
 
             while self.running:
                 try:
@@ -165,24 +214,48 @@ class RPiWatch:
                     current_value = self.metric_store.get_latest()
 
                     if current_value is not None:
-                        # Only update display if value changed (reduces I2C traffic)
-                        if current_value != last_value:
-                            # Render and display metric
-                            image = self.renderer.render_and_mask(
+                        render_state = (
+                            'metric',
+                            current_value,
+                            metric_config.get('decimal_places', 1),
+                            metric_config.get('unit_label', ''),
+                        )
+
+                        # Only update display if value changed (reduces SPI traffic)
+                        if render_state != last_render_state:
+                            self._display_metric_value(
                                 current_value,
                                 decimal_places=metric_config.get('decimal_places', 1),
-                                unit_label=metric_config.get('unit_label', '')
+                                unit_label=metric_config.get('unit_label', ''),
                             )
-                            self.display.display(image)
-
-                            last_value = current_value
+                            last_render_state = render_state
                             frame_count += 1
                             logger.debug(f"Display updated (frame {frame_count}): {current_value}")
+                    elif demo_metric is not None:
+                        render_state = (
+                            'demo',
+                            demo_metric['value'],
+                            demo_metric['decimal_places'],
+                            demo_metric['unit_label'],
+                        )
+
+                        if render_state != last_render_state:
+                            logger.info(
+                                f"Displaying demo metric until first MQTT update: "
+                                f"{demo_metric['value']}"
+                            )
+                            self._display_metric_value(
+                                demo_metric['value'],
+                                decimal_places=demo_metric['decimal_places'],
+                                unit_label=demo_metric['unit_label'],
+                            )
+                            last_render_state = render_state
                     else:
-                        # No metric received yet
-                        if frame_count == 0:
+                        render_state = ('waiting',)
+                        if render_state != last_render_state:
                             logger.info("Waiting for MQTT metric...")
                             self._display_waiting()
+                            last_render_state = render_state
 
                     # Sleep for frame time
                     time.sleep(frame_time)
