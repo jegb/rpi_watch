@@ -66,7 +66,7 @@ metric_display:
     pm_2_5: [0, 214, 143]
     pm_4_0: [255, 195, 0]
     pm_10_0: [255, 107, 53]
-  ring_field: "pm_2_5"       # Preferred field for the metric_ring layout; PM2.5 uses ATSDR guidance bands
+  ring_field: "pm_2_5"       # Preferred field when metric_ring rotation is disabled
   ring_min_value: 0.0
   ring_max_value: 40.0
   ring_start_angle: 135.0
@@ -80,13 +80,60 @@ metric_display:
   ring_title_gap: 8
   ring_unit_gap: 6
   ring_track_color: [52, 52, 52]
-  ring_thresholds:            # Used for non-PM gradient rings such as temperature
+  ring_thresholds:            # Fallback gradient used if a field has no explicit ring profile
     - value: 0.0
       color: [64, 128, 255]
     - value: 22.0
       color: [0, 220, 120]
     - value: 35.0
       color: [255, 96, 64]
+  ring_profiles:
+    temp:
+      min_value: 0.0
+      max_value: 40.0
+      thresholds:
+        - value: 0.0
+          color: [64, 128, 255]
+        - value: 22.0
+          color: [0, 220, 120]
+        - value: 35.0
+          color: [255, 96, 64]
+    humidity:
+      min_value: 0.0
+      max_value: 100.0
+      thresholds:
+        - value: 0.0
+          color: [92, 172, 255]
+        - value: 45.0
+          color: [0, 220, 120]
+        - value: 70.0
+          color: [250, 204, 21]
+        - value: 85.0
+          color: [255, 96, 64]
+    pm_1_0:
+      min_value: 0.0
+      max_value: 25.0
+      thresholds:
+        - value: 0.0
+          color: [92, 172, 255]
+        - value: 6.0
+          color: [0, 214, 143]
+        - value: 12.0
+          color: [255, 195, 0]
+        - value: 20.0
+          color: [255, 107, 53]
+    pm_4_0:
+      min_value: 0.0
+      max_value: 40.0
+      thresholds:
+        - value: 0.0
+          color: [92, 172, 255]
+        - value: 10.0
+          color: [0, 214, 143]
+        - value: 20.0
+          color: [255, 195, 0]
+        - value: 30.0
+          color: [255, 107, 53]
   text_color: [255, 255, 255]    # RGB white
   background_color: [0, 0, 0]    # RGB black
 

@@ -46,6 +46,48 @@ FIELD_DISPLAY_DEFAULTS = {
     'humidity': {'decimal_places': 1, 'title_label': 'HUMID', 'unit_label': '%'},
 }
 
+FIELD_RING_DEFAULTS = {
+    'pm_1_0': {
+        'min_value': 0.0,
+        'max_value': 25.0,
+        'thresholds': [
+            {'value': 0.0, 'color': [92, 172, 255]},
+            {'value': 6.0, 'color': [0, 214, 143]},
+            {'value': 12.0, 'color': [255, 195, 0]},
+            {'value': 20.0, 'color': [255, 107, 53]},
+        ],
+    },
+    'pm_4_0': {
+        'min_value': 0.0,
+        'max_value': 40.0,
+        'thresholds': [
+            {'value': 0.0, 'color': [92, 172, 255]},
+            {'value': 10.0, 'color': [0, 214, 143]},
+            {'value': 20.0, 'color': [255, 195, 0]},
+            {'value': 30.0, 'color': [255, 107, 53]},
+        ],
+    },
+    'temp': {
+        'min_value': 0.0,
+        'max_value': 40.0,
+        'thresholds': [
+            {'value': 0.0, 'color': [64, 128, 255]},
+            {'value': 22.0, 'color': [0, 220, 120]},
+            {'value': 35.0, 'color': [255, 96, 64]},
+        ],
+    },
+    'humidity': {
+        'min_value': 0.0,
+        'max_value': 100.0,
+        'thresholds': [
+            {'value': 0.0, 'color': [92, 172, 255]},
+            {'value': 45.0, 'color': [0, 220, 120]},
+            {'value': 70.0, 'color': [250, 204, 21]},
+            {'value': 85.0, 'color': [255, 96, 64]},
+        ],
+    },
+}
+
 
 class RPiWatch:
     """Main application controller for RPi Watch."""
@@ -222,6 +264,23 @@ class RPiWatch:
         if band is None:
             return None
         return band.color
+
+    def _get_ring_profile(self, field_name: Optional[str]) -> dict:
+        """Resolve ring min/max/threshold profile for a field."""
+        metric_config = self._get_metric_display_config()
+        profiles = metric_config.get('ring_profiles') or {}
+        configured = profiles.get(field_name, {}) if isinstance(profiles, dict) and field_name else {}
+        defaults = FIELD_RING_DEFAULTS.get(field_name, {})
+
+        min_value = float(configured.get('min_value', defaults.get('min_value', metric_config.get('ring_min_value', 0.0))))
+        max_value = float(configured.get('max_value', defaults.get('max_value', metric_config.get('ring_max_value', 40.0))))
+        thresholds = configured.get('thresholds', defaults.get('thresholds', metric_config.get('ring_thresholds')))
+
+        return {
+            'min_value': min_value,
+            'max_value': max_value,
+            'thresholds': thresholds,
+        }
 
     def _get_preferred_metric_field(self) -> Optional[str]:
         """Return the preferred payload field to display."""
@@ -415,18 +474,25 @@ class RPiWatch:
     ) -> Optional[dict]:
         """Choose which metric should drive the ring layout."""
         metric_config = self._get_metric_display_config()
-        preferred_field = metric_config.get('ring_field') or self._get_preferred_metric_field()
         numeric_payload = self.metric_store.extract_numeric_payload(payload)
+        preferred_field = metric_config.get('ring_field') or self._get_preferred_metric_field()
 
-        if preferred_field and preferred_field in numeric_payload:
-            field_name = preferred_field
-            value = numeric_payload[field_name]
-        elif numeric_payload:
-            selected = self._select_display_metric(payload, current_time=current_time)
-            if selected is None:
+        if numeric_payload:
+            field_name = self._select_rotating_field(
+                numeric_payload,
+                current_time=current_time,
+            )
+            if field_name is None:
+                if preferred_field and preferred_field in numeric_payload:
+                    field_name = preferred_field
+                else:
+                    selected = self._select_display_metric(payload, current_time=current_time)
+                    if selected is None:
+                        return None
+                    field_name = selected['field']
+            value = numeric_payload.get(field_name)
+            if value is None:
                 return None
-            field_name = selected['field']
-            value = selected['value']
         elif scalar_value is not None:
             field_name = preferred_field or self._get_preferred_metric_field() or 'value'
             value = scalar_value
@@ -434,34 +500,29 @@ class RPiWatch:
             return None
 
         display_metadata = self._get_display_metadata(field_name)
-        value_color = self._get_metric_value_color(field_name, payload)
         guidance_bands = get_guidance_bands(field_name)
         guidance_range = get_guidance_display_range(field_name)
+        ring_profile = self._get_ring_profile(field_name)
         return {
             'field': field_name,
             'value': value,
             'decimal_places': display_metadata['decimal_places'],
             'title_label': display_metadata['title_label'],
             'unit_label': display_metadata['unit_label'],
-            'value_color': value_color,
+            'value_color': self._get_metric_value_color(field_name, payload) if guidance_bands else None,
             'guidance_bands': serialize_guidance_bands(field_name) if guidance_bands else None,
             'guidance_range': guidance_range,
+            'ring_min_value': ring_profile['min_value'],
+            'ring_max_value': ring_profile['max_value'],
+            'thresholds': ring_profile['thresholds'],
         }
 
     def _display_metric_ring(self, metric: dict) -> None:
         """Render a threshold-colored ring layout."""
         metric_config = self._get_metric_display_config()
         guidance_range = metric.get('guidance_range')
-        ring_min_value = (
-            guidance_range[0]
-            if guidance_range is not None
-            else float(metric_config.get('ring_min_value', 0.0))
-        )
-        ring_max_value = (
-            guidance_range[1]
-            if guidance_range is not None
-            else float(metric_config.get('ring_max_value', 40.0))
-        )
+        ring_min_value = guidance_range[0] if guidance_range is not None else float(metric.get('ring_min_value', metric_config.get('ring_min_value', 0.0)))
+        ring_max_value = guidance_range[1] if guidance_range is not None else float(metric.get('ring_max_value', metric_config.get('ring_max_value', 40.0)))
         image = self.metric_ring_layout.render(
             metric['value'],
             title=metric['title_label'],
@@ -473,7 +534,7 @@ class RPiWatch:
             end_angle=float(metric_config.get('ring_end_angle', 405.0)),
             thickness=int(metric_config.get('ring_thickness', 16)),
             rounded_caps=bool(metric_config.get('ring_rounded_caps', True)),
-            thresholds=metric_config.get('ring_thresholds'),
+            thresholds=metric.get('thresholds', metric_config.get('ring_thresholds')),
             threshold_bands=metric.get('guidance_bands'),
             track_color=self._coerce_color(
                 metric_config.get('ring_track_color'),
