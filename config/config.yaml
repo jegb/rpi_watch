@@ -2,7 +2,7 @@ display:
   # SPI Configuration (Raspberry Pi hardware SPI)
   spi_bus: 0                 # SPI bus 0 (/dev/spidev0.x)
   spi_device: 0              # SPI device 0 (/dev/spidev0.0 -> panel CS on GPIO 8)
-  spi_speed: 1000000        # Clock speed 1 MHz (can go up to 40-50 MHz)
+  spi_speed: 20000000       # Clock speed 20 MHz (validated on current hardware)
 
   # Display control GPIOs (BCM numbering)
   spi_dc_pin: 25             # GPIO 25 - Data/Command line (DC/RS)
@@ -64,15 +64,21 @@ metric_display:
     pm_2_5: [0, 214, 143]
     pm_4_0: [255, 195, 0]
     pm_10_0: [255, 107, 53]
-  ring_field: "temp"         # Preferred field for the metric_ring layout
+  ring_field: "pm_2_5"       # Preferred field for the metric_ring layout; PM2.5 uses ATSDR guidance bands
   ring_min_value: 0.0
   ring_max_value: 40.0
   ring_start_angle: 135.0
   ring_end_angle: 405.0
   ring_thickness: 16
   ring_rounded_caps: true
+  ring_inner_margin: 54     # Extra center padding so the title/value/unit block does not crowd the ring
+  ring_title_font_size: 20
+  ring_value_font_size: 82
+  ring_unit_font_size: 18
+  ring_title_gap: 8
+  ring_unit_gap: 6
   ring_track_color: [52, 52, 52]
-  ring_thresholds:
+  ring_thresholds:            # Used for non-PM gradient rings such as temperature
     - value: 0.0
       color: [64, 128, 255]
     - value: 22.0

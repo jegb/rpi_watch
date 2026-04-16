@@ -657,6 +657,127 @@ class CircularGauge:
         return stops[-1][1]
 
     @staticmethod
+    def _resolve_bands(bands: Optional[Sequence[Any]]) -> list[dict[str, Any]]:
+        """Normalize categorical band definitions into dictionaries."""
+        normalized: list[dict[str, Any]] = []
+        if not bands:
+            return normalized
+
+        for band in bands:
+            if isinstance(band, dict):
+                raw_low = band.get("low")
+                raw_high = band.get("high")
+                raw_color = band.get("color")
+                category = band.get("category")
+            elif isinstance(band, (tuple, list)) and len(band) >= 3:
+                raw_low, raw_high, raw_color = band[:3]
+                category = band[3] if len(band) >= 4 else None
+            else:
+                continue
+
+            try:
+                normalized.append(
+                    {
+                        "low": float(raw_low),
+                        "high": float(raw_high) if raw_high is not None else None,
+                        "color": tuple(int(channel) for channel in raw_color[:3]),
+                        "category": str(category) if category is not None else None,
+                    }
+                )
+            except (TypeError, ValueError):
+                continue
+
+        normalized.sort(key=lambda item: item["low"])
+        return normalized
+
+    @classmethod
+    def color_from_bands(
+        cls,
+        value: float,
+        bands: Optional[Sequence[Any]],
+    ) -> Optional[Tuple[int, int, int]]:
+        """Resolve the active categorical band color for a value."""
+        resolved_bands = cls._resolve_bands(bands)
+        if not resolved_bands:
+            return None
+
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return resolved_bands[0]["color"]
+
+        if numeric_value <= resolved_bands[0]["low"]:
+            return resolved_bands[0]["color"]
+
+        for band in resolved_bands:
+            high = band["high"]
+            if high is None:
+                if numeric_value >= band["low"]:
+                    return band["color"]
+            elif band["low"] <= numeric_value <= high:
+                return band["color"]
+
+        return resolved_bands[-1]["color"]
+
+    @classmethod
+    def _band_display_high(
+        cls,
+        resolved_bands: Sequence[dict[str, Any]],
+        index: int,
+    ) -> float:
+        """Return a finite upper bound for display/marker interpolation."""
+        band = resolved_bands[index]
+        if band["high"] is not None:
+            return float(band["high"])
+
+        fallback_span = None
+        for previous_index in range(index - 1, -1, -1):
+            previous = resolved_bands[previous_index]
+            if previous["high"] is not None:
+                fallback_span = float(previous["high"]) - float(previous["low"])
+                break
+
+        if fallback_span is None or fallback_span <= 0:
+            fallback_span = max(1.0, float(band["low"]) or 1.0)
+
+        return float(band["low"]) + fallback_span
+
+    @classmethod
+    def _marker_angle_for_bands(
+        cls,
+        value: float,
+        resolved_bands: Sequence[dict[str, Any]],
+        *,
+        start_angle: float,
+        end_angle: float,
+    ) -> tuple[float, Tuple[int, int, int]]:
+        """Resolve the marker angle and active band color."""
+        if not resolved_bands:
+            return start_angle, (255, 255, 255)
+
+        start_angle, end_angle = cls._normalize_arc_angles(start_angle, end_angle)
+        segment_sweep = (end_angle - start_angle) / len(resolved_bands)
+
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            numeric_value = float(resolved_bands[0]["low"])
+
+        if numeric_value <= resolved_bands[0]["low"]:
+            return start_angle, resolved_bands[0]["color"]
+
+        for index, band in enumerate(resolved_bands):
+            display_low = float(band["low"])
+            display_high = cls._band_display_high(resolved_bands, index)
+            if numeric_value <= display_high or index == len(resolved_bands) - 1:
+                span = max(1e-6, display_high - display_low)
+                fraction = max(0.0, min(1.0, (numeric_value - display_low) / span))
+                band_start = start_angle + (segment_sweep * index)
+                return band_start + (segment_sweep * fraction), band["color"]
+
+        return end_angle, resolved_bands[-1]["color"]
+
+    @staticmethod
     def _point_on_circle(
         center_x: int,
         center_y: int,
@@ -915,6 +1036,104 @@ class CircularGauge:
                     ],
                     fill=color,
                 )
+
+        return img
+
+    def render_banded_ring(
+        self,
+        value: float,
+        *,
+        bands: Sequence[Any],
+        start_angle: float = 135.0,
+        end_angle: float = 405.0,
+        thickness: int = 12,
+        background_color: Tuple[int, int, int] = (0, 0, 0),
+        track_color: Tuple[int, int, int] = (45, 45, 45),
+        rounded_caps: bool = True,
+        show_marker: bool = True,
+        marker_fill_color: Tuple[int, int, int] = (255, 255, 255),
+        marker_outline_color: Optional[Tuple[int, int, int]] = None,
+        segment_gap_degrees: float = 2.0,
+    ) -> Image.Image:
+        """Render a categorical threshold ring with a visible current-value marker."""
+        img = Image.new('RGB', (self.width, self.height), background_color)
+        draw = ImageDraw.Draw(img)
+
+        resolved_bands = self._resolve_bands(bands)
+        if not resolved_bands:
+            return img
+
+        start_angle, end_angle = self._normalize_arc_angles(start_angle, end_angle)
+        total_sweep = end_angle - start_angle
+        segment_sweep = total_sweep / len(resolved_bands)
+        ring_radius = self.outer_radius - max(2, thickness // 2)
+
+        self._draw_arc_segment(
+            draw,
+            center_x=self.center_x,
+            center_y=self.center_y,
+            radius=ring_radius,
+            angle_start=start_angle,
+            angle_end=end_angle,
+            color=track_color,
+            width=thickness,
+            rounded_caps=rounded_caps,
+        )
+
+        for index, band in enumerate(resolved_bands):
+            segment_start = start_angle + (segment_sweep * index)
+            segment_end = segment_start + segment_sweep
+            if len(resolved_bands) > 1:
+                gap = segment_gap_degrees / 2.0
+                if index > 0:
+                    segment_start += gap
+                if index < len(resolved_bands) - 1:
+                    segment_end -= gap
+            if segment_end <= segment_start:
+                continue
+
+            self._draw_arc_segment(
+                draw,
+                center_x=self.center_x,
+                center_y=self.center_y,
+                radius=ring_radius,
+                angle_start=segment_start,
+                angle_end=segment_end,
+                color=band["color"],
+                width=thickness,
+                rounded_caps=rounded_caps and (index == 0 or index == len(resolved_bands) - 1),
+            )
+
+        if show_marker:
+            marker_angle, active_color = self._marker_angle_for_bands(
+                value,
+                resolved_bands,
+                start_angle=start_angle,
+                end_angle=end_angle,
+            )
+            marker_outline = marker_outline_color or active_color
+            marker_x, marker_y = self._point_on_circle(
+                self.center_x,
+                self.center_y,
+                ring_radius,
+                marker_angle,
+            )
+            outer_radius = max(4, (thickness // 2) + 1)
+            inner_radius = max(2, outer_radius - 2)
+            draw.ellipse(
+                [
+                    (marker_x - outer_radius, marker_y - outer_radius),
+                    (marker_x + outer_radius, marker_y + outer_radius),
+                ],
+                fill=marker_outline,
+            )
+            draw.ellipse(
+                [
+                    (marker_x - inner_radius, marker_y - inner_radius),
+                    (marker_x + inner_radius, marker_y + inner_radius),
+                ],
+                fill=marker_fill_color,
+            )
 
         return img
 

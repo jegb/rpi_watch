@@ -24,6 +24,7 @@ from rpi_watch.display.components import (
     ProgressBar,
 )
 from rpi_watch.display.layouts import MetricRingLayout, PMBarsLayout
+from rpi_watch.metrics import serialize_guidance_bands
 from rpi_watch.utils import setup_logging
 
 setup_logging('INFO')
@@ -336,6 +337,17 @@ def test_layout_extensions():
         ],
     )
     save_test_image(ring_img, "/tmp/test_layout_metric_ring.png")
+
+    pm_ring_img = ring_layout.render(
+        42.8,
+        title="PM2.5",
+        unit="µg/m³",
+        min_value=0.0,
+        max_value=325.4,
+        threshold_bands=serialize_guidance_bands("pm_2_5"),
+        value_color=(251, 146, 60),
+    )
+    save_test_image(pm_ring_img, "/tmp/test_layout_pm25_guidance_ring.png")
 
     logger.info("✓ Extended layout tests passed")
 

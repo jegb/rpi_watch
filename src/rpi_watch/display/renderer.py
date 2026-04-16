@@ -165,10 +165,14 @@ class MetricRenderer:
         unit_label: str = "",
         sparkline_values: Optional[Sequence[Any]] = None,
         sparkline_color: Optional[Tuple[int, int, int]] = None,
+        value_color: Optional[Tuple[int, int, int]] = None,
+        label_color: Optional[Tuple[int, int, int]] = None,
     ) -> Image.Image:
         """Render arbitrary display text with optional title and unit lines."""
         image = Image.new('RGB', (self.width, self.height), self.background_color)
         draw = ImageDraw.Draw(image)
+        value_color = value_color or self.text_color
+        label_color = label_color or self.text_color
 
         max_text_width = self.width - (self.padding * 2)
         sparkline_values = list(sparkline_values or [])
@@ -195,6 +199,7 @@ class MetricRenderer:
                 "width": title_bbox[2] - title_bbox[0],
                 "height": title_bbox[3] - title_bbox[1],
                 "top": title_bbox[1],
+                "kind": "label",
                 "gap_after": self.title_gap,
             }
 
@@ -212,6 +217,7 @@ class MetricRenderer:
                 "width": unit_bbox[2] - unit_bbox[0],
                 "height": unit_bbox[3] - unit_bbox[1],
                 "top": unit_bbox[1],
+                "kind": "label",
                 "gap_after": 0,
             }
 
@@ -234,6 +240,7 @@ class MetricRenderer:
                     "width": value_width,
                     "height": value_height,
                     "top": value_bbox[1],
+                    "kind": "value",
                     "gap_after": self.unit_gap if unit_line else 0,
                 }
             )
@@ -267,6 +274,7 @@ class MetricRenderer:
                     "width": value_width,
                     "height": value_height,
                     "top": chosen_value_bbox[1],
+                    "kind": "value",
                     "gap_after": self.unit_gap if unit_line else 0,
                 }
             )
@@ -282,7 +290,7 @@ class MetricRenderer:
             draw.text(
                 (text_x, draw_y),
                 line["text"],
-                fill=self.text_color,
+                fill=value_color if line.get("kind") == "value" else label_color,
                 font=line["font"],
             )
             current_y += line["height"] + line["gap_after"]
@@ -317,6 +325,8 @@ class MetricRenderer:
         unit_label: str = "",
         sparkline_values: Optional[Sequence[Any]] = None,
         sparkline_color: Optional[Tuple[int, int, int]] = None,
+        value_color: Optional[Tuple[int, int, int]] = None,
+        label_color: Optional[Tuple[int, int, int]] = None,
     ) -> Image.Image:
         """Render a metric as a PIL Image.
 
@@ -343,6 +353,8 @@ class MetricRenderer:
             unit_label=unit_label,
             sparkline_values=sparkline_values,
             sparkline_color=sparkline_color,
+            value_color=value_color,
+            label_color=label_color,
         )
 
         logger.debug(
@@ -387,6 +399,8 @@ class MetricRenderer:
         unit_label: str = "",
         sparkline_values: Optional[Sequence[Any]] = None,
         sparkline_color: Optional[Tuple[int, int, int]] = None,
+        value_color: Optional[Tuple[int, int, int]] = None,
+        label_color: Optional[Tuple[int, int, int]] = None,
     ) -> Image.Image:
         """Render metric and apply circular mask in one step.
 
@@ -406,6 +420,8 @@ class MetricRenderer:
             unit_label=unit_label,
             sparkline_values=sparkline_values,
             sparkline_color=sparkline_color,
+            value_color=value_color,
+            label_color=label_color,
         )
         masked_image = self.apply_circular_mask(image)
         return masked_image

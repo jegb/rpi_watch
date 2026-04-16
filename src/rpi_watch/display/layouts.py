@@ -752,65 +752,93 @@ class MetricRingLayout(DisplayLayout):
         thickness: int = 16,
         rounded_caps: bool = True,
         thresholds: Optional[list] = None,
+        threshold_bands: Optional[list] = None,
         track_color: Optional[Tuple[int, int, int]] = None,
+        value_color: Optional[Tuple[int, int, int]] = None,
+        show_marker: bool = True,
+        inner_margin: int = 54,
+        title_font_size: int = 20,
+        value_font_size: int = 82,
+        unit_font_size: int = 18,
+        title_gap: int = 8,
+        unit_gap: int = 6,
     ) -> Image.Image:
         """Render a single metric over a configurable ring."""
         track = track_color or self.color_scheme["secondary"]
-        img = self.gauge.render_gradient_ring(
-            value,
-            min_value=min_value,
-            max_value=max_value,
-            thresholds=thresholds,
-            start_angle=start_angle,
-            end_angle=end_angle,
-            thickness=thickness,
-            background_color=self.bg_color,
-            track_color=track,
-            rounded_caps=rounded_caps,
-        )
+        if threshold_bands:
+            img = self.gauge.render_banded_ring(
+                value,
+                bands=threshold_bands,
+                start_angle=start_angle,
+                end_angle=end_angle,
+                thickness=thickness,
+                background_color=self.bg_color,
+                track_color=track,
+                rounded_caps=rounded_caps,
+                show_marker=show_marker,
+                marker_fill_color=(255, 255, 255),
+            )
+        else:
+            img = self.gauge.render_gradient_ring(
+                value,
+                min_value=min_value,
+                max_value=max_value,
+                thresholds=thresholds,
+                start_angle=start_angle,
+                end_angle=end_angle,
+                thickness=thickness,
+                background_color=self.bg_color,
+                track_color=track,
+                rounded_caps=rounded_caps,
+            )
         draw = ImageDraw.Draw(img)
 
         value_text = f"{value:.{decimal_places}f}"
-        value_color = CircularGauge.color_from_thresholds(
-            value,
-            thresholds,
-            min_value=min_value,
-            max_value=max_value,
-        )
+        if value_color is None:
+            if threshold_bands:
+                value_color = CircularGauge.color_from_bands(value, threshold_bands)
+            else:
+                value_color = CircularGauge.color_from_thresholds(
+                    value,
+                    thresholds,
+                    min_value=min_value,
+                    max_value=max_value,
+                )
+        value_color = value_color or self.color_scheme["primary"]
 
-        inner_margin = max(42, thickness + 28)
-        available_width = self.width - (inner_margin * 2)
-        available_height = self.height - (inner_margin * 2)
+        inner_margin = max(int(inner_margin), thickness + 30)
+        available_width = max(40, self.width - (inner_margin * 2))
+        available_height = max(40, self.height - (inner_margin * 2))
 
         title_font, title_bbox = self.text_renderer.fit_font(
             title,
-            24,
+            title_font_size,
             max_width=available_width,
-            min_size=14,
-            max_height=max(16, int(available_height * 0.18)),
+            min_size=12,
+            max_height=max(14, int(available_height * 0.16)),
         )
         unit_font, unit_bbox = self.text_renderer.fit_font(
             unit,
-            22,
+            unit_font_size,
             max_width=available_width,
-            min_size=14,
-            max_height=max(16, int(available_height * 0.18)),
+            min_size=12,
+            max_height=max(14, int(available_height * 0.16)),
         )
 
         chosen_value_font = None
         chosen_value_bbox = None
-        for size in range(96, 25, -2):
+        for size in range(value_font_size, 21, -2):
             value_font, value_bbox = self.text_renderer.fit_font(
                 value_text,
                 size,
                 max_width=available_width,
-                min_size=24,
+                min_size=20,
             )
             total_height = (
                 (title_bbox[3] - title_bbox[1])
-                + 10
+                + title_gap
                 + (value_bbox[3] - value_bbox[1])
-                + 8
+                + unit_gap
                 + (unit_bbox[3] - unit_bbox[1])
             )
             if total_height <= available_height:
@@ -821,21 +849,21 @@ class MetricRingLayout(DisplayLayout):
         if chosen_value_font is None or chosen_value_bbox is None:
             chosen_value_font, chosen_value_bbox = self.text_renderer.fit_font(
                 value_text,
-                48,
+                min(48, value_font_size),
                 max_width=available_width,
-                min_size=24,
+                min_size=18,
                 max_height=available_height,
             )
 
         title_height = title_bbox[3] - title_bbox[1]
         value_height = chosen_value_bbox[3] - chosen_value_bbox[1]
         unit_height = unit_bbox[3] - unit_bbox[1]
-        total_height = title_height + 10 + value_height + 8 + unit_height
+        total_height = title_height + title_gap + value_height + unit_gap + unit_height
         current_y = inner_margin + max(0, (available_height - total_height) // 2)
 
         for text, font, bbox, color, gap in (
-            (title, title_font, title_bbox, self.color_scheme["secondary"], 10),
-            (value_text, chosen_value_font, chosen_value_bbox, value_color, 8),
+            (title, title_font, title_bbox, self.color_scheme["secondary"], title_gap),
+            (value_text, chosen_value_font, chosen_value_bbox, value_color, unit_gap),
             (unit, unit_font, unit_bbox, self.color_scheme["secondary"], 0),
         ):
             text_width = bbox[2] - bbox[0]

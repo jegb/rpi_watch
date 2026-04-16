@@ -16,7 +16,13 @@ from .display import (
     MetricRingLayout,
     PMBarsLayout,
 )
-from .metrics import MetricStore
+from .metrics import (
+    MetricStore,
+    classify_display_band,
+    get_guidance_bands,
+    get_guidance_display_range,
+    serialize_guidance_bands,
+)
 from .mqtt import MQTTSubscriber
 from .utils import setup_logging
 
@@ -206,6 +212,17 @@ class RPiWatch:
         history_limit = limit or self._get_metric_display_config().get('sparkline_points', 10)
         return self.metric_store.get_field_history(field_name, limit=history_limit)
 
+    def _get_metric_value_color(
+        self,
+        field_name: Optional[str],
+        payload: Optional[dict],
+    ) -> Optional[tuple[int, int, int]]:
+        """Return an optional PM guidance color for the displayed value."""
+        band = classify_display_band(field_name, payload)
+        if band is None:
+            return None
+        return band.color
+
     def _get_preferred_metric_field(self) -> Optional[str]:
         """Return the preferred payload field to display."""
         metric_config = self._get_metric_display_config()
@@ -348,6 +365,7 @@ class RPiWatch:
         title_label: str,
         unit_label: str,
         sparkline_values: Optional[list[tuple[float, float]]] = None,
+        value_color: Optional[tuple[int, int, int]] = None,
     ) -> None:
         """Render and display a metric or placeholder."""
         metric_config = self._get_metric_display_config()
@@ -361,6 +379,8 @@ class RPiWatch:
                 metric_config.get('sparkline_line_color'),
                 tuple(metric_config.get('text_color', [255, 255, 255])),
             ),
+            value_color=value_color,
+            label_color=tuple(metric_config.get('text_color', [255, 255, 255])),
         )
         self.display.display(image)
 
@@ -412,33 +432,59 @@ class RPiWatch:
             return None
 
         display_metadata = self._get_display_metadata(field_name)
+        value_color = self._get_metric_value_color(field_name, payload)
+        guidance_bands = get_guidance_bands(field_name)
+        guidance_range = get_guidance_display_range(field_name)
         return {
             'field': field_name,
             'value': value,
             'decimal_places': display_metadata['decimal_places'],
             'title_label': display_metadata['title_label'],
             'unit_label': display_metadata['unit_label'],
+            'value_color': value_color,
+            'guidance_bands': serialize_guidance_bands(field_name) if guidance_bands else None,
+            'guidance_range': guidance_range,
         }
 
     def _display_metric_ring(self, metric: dict) -> None:
         """Render a threshold-colored ring layout."""
         metric_config = self._get_metric_display_config()
+        guidance_range = metric.get('guidance_range')
+        ring_min_value = (
+            guidance_range[0]
+            if guidance_range is not None
+            else float(metric_config.get('ring_min_value', 0.0))
+        )
+        ring_max_value = (
+            guidance_range[1]
+            if guidance_range is not None
+            else float(metric_config.get('ring_max_value', 40.0))
+        )
         image = self.metric_ring_layout.render(
             metric['value'],
             title=metric['title_label'],
             unit=metric['unit_label'],
             decimal_places=metric['decimal_places'],
-            min_value=float(metric_config.get('ring_min_value', 0.0)),
-            max_value=float(metric_config.get('ring_max_value', 40.0)),
+            min_value=ring_min_value,
+            max_value=ring_max_value,
             start_angle=float(metric_config.get('ring_start_angle', 135.0)),
             end_angle=float(metric_config.get('ring_end_angle', 405.0)),
             thickness=int(metric_config.get('ring_thickness', 16)),
             rounded_caps=bool(metric_config.get('ring_rounded_caps', True)),
             thresholds=metric_config.get('ring_thresholds'),
+            threshold_bands=metric.get('guidance_bands'),
             track_color=self._coerce_color(
                 metric_config.get('ring_track_color'),
                 self.metric_ring_layout.color_scheme["secondary"],
             ),
+            value_color=metric.get('value_color'),
+            show_marker=True,
+            inner_margin=int(metric_config.get('ring_inner_margin', 54)),
+            title_font_size=int(metric_config.get('ring_title_font_size', 20)),
+            value_font_size=int(metric_config.get('ring_value_font_size', 82)),
+            unit_font_size=int(metric_config.get('ring_unit_font_size', 18)),
+            title_gap=int(metric_config.get('ring_title_gap', 8)),
+            unit_gap=int(metric_config.get('ring_unit_gap', 6)),
         )
         self.display.display(self.renderer.apply_circular_mask(image))
 
@@ -482,6 +528,7 @@ class RPiWatch:
             'decimal_places': display_metadata['decimal_places'],
             'title_label': display_metadata['title_label'],
             'unit_label': display_metadata['unit_label'],
+            'value_color': self._get_metric_value_color(field_name, payload),
         }
 
     def run(self) -> None:
@@ -558,6 +605,7 @@ class RPiWatch:
                                 ring_metric['decimal_places'],
                                 ring_metric['title_label'],
                                 ring_metric['unit_label'],
+                                ring_metric.get('value_color'),
                             )
 
                             if render_state != last_render_state:
@@ -606,6 +654,7 @@ class RPiWatch:
                             selected_metric['decimal_places'],
                             selected_metric['title_label'],
                             selected_metric['unit_label'],
+                            selected_metric.get('value_color'),
                             sparkline_state,
                         )
 
@@ -617,6 +666,7 @@ class RPiWatch:
                                 title_label=selected_metric['title_label'],
                                 unit_label=selected_metric['unit_label'],
                                 sparkline_values=sparkline_series,
+                                value_color=selected_metric.get('value_color'),
                             )
                             last_render_state = render_state
                             frame_count += 1
@@ -635,6 +685,7 @@ class RPiWatch:
                             display_metadata['decimal_places'],
                             display_metadata['title_label'],
                             display_metadata['unit_label'],
+                            self._get_metric_value_color(display_metadata['field'], current_payload),
                             sparkline_state,
                         )
 
@@ -645,6 +696,7 @@ class RPiWatch:
                                 title_label=display_metadata['title_label'],
                                 unit_label=display_metadata['unit_label'],
                                 sparkline_values=sparkline_series,
+                                value_color=self._get_metric_value_color(display_metadata['field'], current_payload),
                             )
                             last_render_state = render_state
                             frame_count += 1
