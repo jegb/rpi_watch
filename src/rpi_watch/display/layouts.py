@@ -917,7 +917,7 @@ class MetricRingLayout(DisplayLayout):
         max_value: float = 40.0,
         start_angle: float = 135.0,
         end_angle: float = 405.0,
-        thickness: int = 16,
+        thickness: int = 20,
         rounded_caps: bool = True,
         thresholds: Optional[list] = None,
         threshold_bands: Optional[list] = None,
@@ -958,6 +958,7 @@ class MetricRingLayout(DisplayLayout):
                 background_color=self.bg_color,
                 track_color=track,
                 rounded_caps=rounded_caps,
+                show_marker=show_marker,
             )
         draw = ImageDraw.Draw(img)
 

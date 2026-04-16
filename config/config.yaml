@@ -71,7 +71,7 @@ metric_display:
   ring_max_value: 40.0
   ring_start_angle: 135.0
   ring_end_angle: 405.0
-  ring_thickness: 16
+  ring_thickness: 20          # Controllable ring width in pixels
   ring_rounded_caps: true
   ring_inner_margin: 54     # Extra center padding so the title/value/unit block does not crowd the ring
   ring_title_font_size: 20

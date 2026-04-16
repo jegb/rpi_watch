@@ -875,6 +875,64 @@ class CircularGauge:
         draw_callback(hi_draw, render_scale)
         return hi_img.resize((self.width, self.height), RESAMPLE_LANCZOS)
 
+    def _draw_ring_pointer_marker(
+        self,
+        draw: ImageDraw.ImageDraw,
+        *,
+        center_x: int,
+        center_y: int,
+        inner_radius: float,
+        outer_radius: float,
+        angle: float,
+        fill_color: Tuple[int, int, int],
+        line_color: Tuple[int, int, int],
+        scale: int = 1,
+    ) -> None:
+        """Draw a subtle pointer marker: inner triangle plus outward hairline."""
+        ring_width = max(1.0, outer_radius - inner_radius)
+        triangle_length = max(6.0 * scale, ring_width * 0.8)
+        triangle_half_width = max(3.0 * scale, triangle_length * 0.42)
+        line_width = max(1, scale)
+
+        angle_rad = math.radians(angle)
+        perp_rad = angle_rad + (math.pi / 2.0)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+        cos_p = math.cos(perp_rad)
+        sin_p = math.sin(perp_rad)
+
+        tip_x = center_x + (inner_radius * cos_a)
+        tip_y = center_y + (inner_radius * sin_a)
+        base_center_x = center_x + ((inner_radius - triangle_length) * cos_a)
+        base_center_y = center_y + ((inner_radius - triangle_length) * sin_a)
+        base_left = (
+            base_center_x + (triangle_half_width * cos_p),
+            base_center_y + (triangle_half_width * sin_p),
+        )
+        base_right = (
+            base_center_x - (triangle_half_width * cos_p),
+            base_center_y - (triangle_half_width * sin_p),
+        )
+        outer_x = center_x + (outer_radius * cos_a)
+        outer_y = center_y + (outer_radius * sin_a)
+
+        draw.polygon(
+            [
+                (tip_x, tip_y),
+                base_left,
+                base_right,
+            ],
+            fill=fill_color,
+        )
+        draw.line(
+            [
+                (tip_x, tip_y),
+                (outer_x, outer_y),
+            ],
+            fill=line_color,
+            width=line_width,
+        )
+
     def _draw_needle(
         self,
         draw: ImageDraw.ImageDraw,
@@ -999,10 +1057,13 @@ class CircularGauge:
         thresholds: Optional[Sequence[Any]] = None,
         start_angle: float = 135.0,
         end_angle: float = 405.0,
-        thickness: int = 12,
+        thickness: int = 20,
         background_color: Tuple[int, int, int] = (0, 0, 0),
         track_color: Tuple[int, int, int] = (45, 45, 45),
         rounded_caps: bool = True,
+        show_marker: bool = True,
+        marker_fill_color: Tuple[int, int, int] = (255, 255, 255),
+        marker_outline_color: Optional[Tuple[int, int, int]] = None,
     ) -> Image.Image:
         """Render a configurable progress ring using threshold-based gradient colors."""
         start_angle, end_angle = self._normalize_arc_angles(start_angle, end_angle)
@@ -1016,6 +1077,8 @@ class CircularGauge:
             center_y = self.center_y * scale
             scaled_thickness = max(1, thickness * scale)
             ring_radius = (self.outer_radius * scale) - max(2 * scale, scaled_thickness // 2)
+            inner_radius = ring_radius - (scaled_thickness / 2.0)
+            outer_radius = ring_radius + (scaled_thickness / 2.0)
 
             self._draw_arc_segment(
                 draw,
@@ -1030,6 +1093,19 @@ class CircularGauge:
             )
 
             if ratio <= 0:
+                if show_marker:
+                    marker_color = marker_outline_color or marker_fill_color
+                    self._draw_ring_pointer_marker(
+                        draw,
+                        center_x=center_x,
+                        center_y=center_y,
+                        inner_radius=inner_radius,
+                        outer_radius=outer_radius,
+                        angle=start_angle,
+                        fill_color=marker_fill_color,
+                        line_color=marker_color,
+                        scale=scale,
+                    )
                 return
 
             steps = max(int(abs(progress_end - start_angle) * 10), 120)
@@ -1080,6 +1156,20 @@ class CircularGauge:
                         fill=color,
                     )
 
+            if show_marker:
+                marker_color = marker_outline_color or marker_fill_color
+                self._draw_ring_pointer_marker(
+                    draw,
+                    center_x=center_x,
+                    center_y=center_y,
+                    inner_radius=inner_radius,
+                    outer_radius=outer_radius,
+                    angle=progress_end,
+                    fill_color=marker_fill_color,
+                    line_color=marker_color,
+                    scale=scale,
+                )
+
         return self._render_supersampled(
             background_color=background_color,
             draw_callback=draw_gradient_ring,
@@ -1093,7 +1183,7 @@ class CircularGauge:
         bands: Sequence[Any],
         start_angle: float = 135.0,
         end_angle: float = 405.0,
-        thickness: int = 12,
+        thickness: int = 20,
         background_color: Tuple[int, int, int] = (0, 0, 0),
         track_color: Tuple[int, int, int] = (45, 45, 45),
         rounded_caps: bool = True,
@@ -1116,6 +1206,8 @@ class CircularGauge:
             center_y = self.center_y * scale
             scaled_thickness = max(1, thickness * scale)
             ring_radius = (self.outer_radius * scale) - max(2 * scale, scaled_thickness // 2)
+            inner_radius = ring_radius - (scaled_thickness / 2.0)
+            outer_radius = ring_radius + (scaled_thickness / 2.0)
 
             self._draw_arc_segment(
                 draw,
@@ -1161,28 +1253,17 @@ class CircularGauge:
                     start_angle=start_angle,
                     end_angle=end_angle,
                 )
-                marker_outline = marker_outline_color or active_color
-                marker_x, marker_y = self._point_on_circle(
-                    center_x,
-                    center_y,
-                    ring_radius,
-                    marker_angle,
-                )
-                outer_radius = max(4, (scaled_thickness // 2) + scale)
-                inner_radius = max(2, outer_radius - (2 * scale))
-                draw.ellipse(
-                    [
-                        (marker_x - outer_radius, marker_y - outer_radius),
-                        (marker_x + outer_radius, marker_y + outer_radius),
-                    ],
-                    fill=marker_outline,
-                )
-                draw.ellipse(
-                    [
-                        (marker_x - inner_radius, marker_y - inner_radius),
-                        (marker_x + inner_radius, marker_y + inner_radius),
-                    ],
-                    fill=marker_fill_color,
+                marker_color = marker_outline_color or marker_fill_color or active_color
+                self._draw_ring_pointer_marker(
+                    draw,
+                    center_x=center_x,
+                    center_y=center_y,
+                    inner_radius=inner_radius,
+                    outer_radius=outer_radius,
+                    angle=marker_angle,
+                    fill_color=marker_fill_color,
+                    line_color=marker_color,
+                    scale=scale,
                 )
 
         return self._render_supersampled(

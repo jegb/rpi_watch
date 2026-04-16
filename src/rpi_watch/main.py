@@ -532,7 +532,7 @@ class RPiWatch:
             max_value=ring_max_value,
             start_angle=float(metric_config.get('ring_start_angle', 135.0)),
             end_angle=float(metric_config.get('ring_end_angle', 405.0)),
-            thickness=int(metric_config.get('ring_thickness', 16)),
+            thickness=int(metric_config.get('ring_thickness', 20)),
             rounded_caps=bool(metric_config.get('ring_rounded_caps', True)),
             thresholds=metric.get('thresholds', metric_config.get('ring_thresholds')),
             threshold_bands=metric.get('guidance_bands'),
