@@ -71,7 +71,7 @@ PYTHONPATH=src python3 -m rpi_watch.main
 
 ## Configuration
 
-Primary runtime config is [config.yaml](/Users/gallar/Documents/workspace/rpi_watch/config/config.yaml).
+Primary runtime config is [`config/config.yaml`](config/config.yaml).
 
 Key sections:
 - `display`: SPI bus, control pins, refresh rate, `madctl`
@@ -154,9 +154,14 @@ rpi_watch/
 │   ├── demo_layouts.py
 │   ├── test_components.py
 │   └── test_mqtt_subscription.py
+├── docs/
+│   ├── README.md
+│   ├── guides/
+│   ├── reference/
+│   ├── status/
+│   └── images/
 ├── setup.sh
-├── SETUP_GUIDE.md
-└── TODO.md
+└── README.md
 ```
 
 ## Troubleshooting
@@ -183,5 +188,6 @@ mosquitto_sub -h 192.168.0.214 -t airquality/sensor -v
 
 ## Additional Docs
 
-- [SETUP_GUIDE.md](/Users/gallar/Documents/workspace/rpi_watch/SETUP_GUIDE.md): step-by-step Pi setup
-- [TODO.md](/Users/gallar/Documents/workspace/rpi_watch/TODO.md): backlog, including animated metric rotation
+- [docs/README.md](docs/README.md): documentation index
+- [docs/guides/SETUP_GUIDE.md](docs/guides/SETUP_GUIDE.md): step-by-step Pi setup
+- [docs/TODO.md](docs/TODO.md): backlog, including animated metric rotation

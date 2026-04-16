@@ -292,7 +292,7 @@ EOF
             success "Configuration updated"
         fi
     else
-        warn "config.yaml not found. Please review config section in SETUP_GUIDE.md"
+        warn "config.yaml not found. Please review config section in docs/guides/SETUP_GUIDE.md"
     fi
 }
 
@@ -306,7 +306,7 @@ print_instructions() {
     echo ""
     echo -e "${GREEN}Next steps:${NC}"
     echo ""
-    echo "1. Verify hardware wiring (see SETUP_GUIDE.md):"
+    echo "1. Verify hardware wiring (see docs/guides/SETUP_GUIDE.md):"
     echo "   - GC9A01 Pin 1 (GND) → Raspberry Pi GND"
     echo "   - GC9A01 Pin 2 (VCC) → Raspberry Pi 3.3V"
     echo "   - GC9A01 Pin 3 (CLK) → Raspberry Pi GPIO 11"
@@ -321,7 +321,7 @@ print_instructions() {
     echo "   source $VENV_DIR/bin/activate"
     echo "   python3 -m rpi_watch.main"
     echo ""
-    echo "4. For systemd auto-start, see 'Production Deployment' section in SETUP_GUIDE.md"
+    echo "4. For systemd auto-start, see 'Production Deployment' section in docs/guides/SETUP_GUIDE.md"
     echo ""
     echo -e "${GREEN}Setup log saved to: $LOG_FILE${NC}"
     echo ""
