@@ -448,8 +448,9 @@ class RPiWatch:
         metric_config = self._get_metric_display_config()
         image = self.pm_bars_layout.render(
             payload,
-            title=str(metric_config.get('pm_bars_title', 'PM')),
+            title=str(metric_config.get('pm_bars_title', 'Particle')),
             unit_label=str(metric_config.get('pm_bars_unit_label', 'µg/m³')),
+            axis_label=str(metric_config.get('pm_bars_axis_label', 'PM')),
             metric_fields=metric_config.get(
                 'pm_bar_fields',
                 ['pm_1_0', 'pm_2_5', 'pm_4_0', 'pm_10_0'],

@@ -55,8 +55,9 @@ metric_display:
   placeholder_text: "--.-"   # Placeholder metric when MQTT is offline or no reading has arrived yet
   placeholder_title_label: "PM2.5"
   placeholder_unit_label: "µg/m³"
-  pm_bars_title: "PM"
+  pm_bars_title: "Particle"
   pm_bars_unit_label: "µg/m³"
+  pm_bars_axis_label: "PM"
   pm_bars_auto_scale_floor: 25.0
   pm_bars_scale_padding_ratio: 0.18   # Shared bars scale to max reading plus this headroom ratio
   pm_bars_orientation: "vertical"     # horizontal or vertical

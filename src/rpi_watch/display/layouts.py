@@ -708,8 +708,9 @@ class PMBarsLayout(DisplayLayout):
         self,
         payload: Dict[str, Any],
         *,
-        title: str = "PM",
+        title: str = "Particle",
         unit_label: str = "µg/m³",
+        axis_label: str = "PM",
         metric_fields: Optional[list] = None,
         metric_colors: Optional[dict[str, Tuple[int, int, int]]] = None,
         max_value: Optional[float] = None,
@@ -749,17 +750,17 @@ class PMBarsLayout(DisplayLayout):
         orientation = str(orientation).lower()
         gap = max(2, int(bar_gap))
 
-        header_top = 12
-        header_height = 20
+        header_top = 10
+        header_height = 18
         footer_height = 14
         content_top = header_top + header_height + 10
         content_bottom = self.height - footer_height - 18
 
         title_font, title_bbox = self.text_renderer.fit_font(
             title,
-            20,
+            18,
             max_width=self.width - 32,
-            min_size=14,
+            min_size=13,
             max_height=header_height,
         )
         title_width = title_bbox[2] - title_bbox[0]
@@ -772,10 +773,10 @@ class PMBarsLayout(DisplayLayout):
 
         if orientation == "vertical":
             column_count = max(1, len(normalized_fields))
-            content_left = 24
-            content_right = self.width - 24
+            content_left = 30
+            content_right = self.width - 30
             column_width = max(
-                22,
+                20,
                 int((content_right - content_left - (gap * (column_count - 1))) / column_count),
             )
             total_width = (column_width * column_count) + (gap * (column_count - 1))
@@ -787,6 +788,24 @@ class PMBarsLayout(DisplayLayout):
             max_value_height = 0
             max_label_height = 0
             reference_values: dict[str, Optional[float]] = {}
+            unit_font, unit_bbox = self.text_renderer.fit_font(
+                unit_label,
+                16,
+                max_width=self.width - 32,
+                min_size=11,
+                max_height=18,
+            )
+            unit_width = unit_bbox[2] - unit_bbox[0]
+            unit_height = unit_bbox[3] - unit_bbox[1]
+            axis_font, axis_bbox = self.text_renderer.fit_font(
+                axis_label,
+                13,
+                max_width=self.width - 48,
+                min_size=10,
+                max_height=14,
+            )
+            axis_width = axis_bbox[2] - axis_bbox[0]
+            axis_height = axis_bbox[3] - axis_bbox[1]
 
             for index, ((field_name, label), value) in enumerate(zip(normalized_fields, values)):
                 column_left = start_x + (index * (column_width + gap))
@@ -811,7 +830,7 @@ class PMBarsLayout(DisplayLayout):
 
                 label_font, label_bbox = self.text_renderer.fit_font(
                     label,
-                    16,
+                    15,
                     max_width=column_width + 14,
                     min_size=10,
                     max_height=18,
@@ -839,12 +858,15 @@ class PMBarsLayout(DisplayLayout):
                 )
 
             common_value_y = common_safe_top
-            common_label_y = common_safe_bottom - max_label_height
-            bar_top = common_value_y + max_value_height + 6
-            bar_bottom = common_label_y - 6
+            axis_y = self.height - 4 - axis_height
+            unit_y = axis_y - 2 - unit_height
+            label_y_target = unit_y - 3 - max_label_height
+            common_label_y = min(common_safe_bottom - max_label_height, label_y_target)
+            bar_top = common_value_y + max_value_height + 4
+            bar_bottom = common_label_y - 4
             if bar_bottom - bar_top < 26:
                 bar_top = common_value_y + max_value_height + 3
-                bar_bottom = max(bar_top + 26, common_safe_bottom - max_label_height - 3)
+                bar_bottom = max(bar_top + 26, common_label_y - 3)
 
             for column in columns:
                 field_name = column["field_name"]
@@ -855,8 +877,9 @@ class PMBarsLayout(DisplayLayout):
                 row_color = colors.get(field_name, self.color_scheme["accent"])
                 if bar_bottom <= bar_top:
                     continue
-                bar_left = column_left + 2
-                bar_right = column_right - 2
+                bar_inner_padding = max(3, column_width // 9)
+                bar_left = column_left + bar_inner_padding
+                bar_right = column_right - bar_inner_padding
                 bar_radius = max(4, min((bar_right - bar_left) // 2, 10))
 
                 draw.text(
@@ -912,8 +935,20 @@ class PMBarsLayout(DisplayLayout):
                                     (line_right, reference_y),
                                 ],
                                 fill=self.color_scheme["secondary"],
-                                width=1,
+                                width=2,
                             )
+            draw.text(
+                ((self.width - unit_width) // 2, unit_y - unit_bbox[1]),
+                unit_label,
+                fill=self.color_scheme["secondary"],
+                font=unit_font,
+            )
+            draw.text(
+                ((self.width - axis_width) // 2, axis_y - axis_bbox[1]),
+                axis_label,
+                fill=self.color_scheme["secondary"],
+                font=axis_font,
+            )
         else:
             row_count = max(1, len(normalized_fields))
             row_height = max(18, int((content_bottom - content_top - (gap * (row_count - 1))) / row_count))
@@ -998,20 +1033,21 @@ class PMBarsLayout(DisplayLayout):
                         radius=bar_radius,
                     )
 
-        unit_font, unit_bbox = self.text_renderer.fit_font(
-            unit_label,
-            18,
-            max_width=self.width - 32,
-            min_size=12,
-            max_height=footer_height,
-        )
-        unit_width = unit_bbox[2] - unit_bbox[0]
-        draw.text(
-            ((self.width - unit_width) // 2, self.height - footer_height - 8 - unit_bbox[1]),
-            unit_label,
-            fill=self.color_scheme["secondary"],
-            font=unit_font,
-        )
+        if orientation != "vertical":
+            unit_font, unit_bbox = self.text_renderer.fit_font(
+                unit_label,
+                18,
+                max_width=self.width - 32,
+                min_size=12,
+                max_height=footer_height,
+            )
+            unit_width = unit_bbox[2] - unit_bbox[0]
+            draw.text(
+                ((self.width - unit_width) // 2, self.height - footer_height - 8 - unit_bbox[1]),
+                unit_label,
+                fill=self.color_scheme["secondary"],
+                font=unit_font,
+            )
 
         return img
 
