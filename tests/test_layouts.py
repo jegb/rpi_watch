@@ -27,6 +27,20 @@ class TestDisplayLayouts(unittest.TestCase):
         self.assertIsInstance(image, Image.Image)
         self.assertEqual(image.size, (240, 240))
 
+    def test_pm_bars_layout_supports_vertical_orientation(self):
+        layout = PMBarsLayout(width=240, height=240)
+        image = layout.render(
+            {
+                "pm_1_0": 4.2,
+                "pm_2_5": 8.1,
+                "pm_4_0": 13.4,
+                "pm_10_0": 18.7,
+            },
+            orientation="vertical",
+        )
+        self.assertIsInstance(image, Image.Image)
+        self.assertEqual(image.size, (240, 240))
+
     def test_metric_ring_layout_renders_image(self):
         layout = MetricRingLayout(width=240, height=240)
         image = layout.render(

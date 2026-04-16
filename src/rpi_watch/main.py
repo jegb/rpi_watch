@@ -401,6 +401,8 @@ class RPiWatch:
             },
             max_value=metric_config.get('pm_bars_max_value'),
             auto_scale_floor=float(metric_config.get('pm_bars_auto_scale_floor', 25.0)),
+            orientation=str(metric_config.get('pm_bars_orientation', 'horizontal')),
+            bar_gap=int(metric_config.get('pm_bars_gap', 6)),
         )
         self.display.display(self.renderer.apply_circular_mask(image))
 

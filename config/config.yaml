@@ -58,6 +58,8 @@ metric_display:
   pm_bars_title: "PARTICLES"
   pm_bars_unit_label: "µg/m³"
   pm_bars_auto_scale_floor: 25.0
+  pm_bars_orientation: "horizontal"   # horizontal or vertical
+  pm_bars_gap: 6                      # Bar row/column gap in pixels
   pm_bar_fields: ["pm_1_0", "pm_2_5", "pm_4_0", "pm_10_0"]
   pm_bars_colors:
     pm_1_0: [92, 172, 255]

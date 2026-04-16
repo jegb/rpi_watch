@@ -4,6 +4,7 @@ Provides common layout patterns combining text, gauges, and progress indicators.
 """
 
 import logging
+import math
 from typing import Optional, Tuple, Dict, Any
 from enum import Enum
 
@@ -587,10 +588,10 @@ class PMBarsLayout(DisplayLayout):
     """Layout: four particulate matter bars with a shared unit label."""
 
     DEFAULT_FIELDS = (
-        ("pm_1_0", "PM1"),
+        ("pm_1_0", "PM1.0"),
         ("pm_2_5", "PM2.5"),
-        ("pm_4_0", "PM4"),
-        ("pm_10_0", "PM10"),
+        ("pm_4_0", "PM4.0"),
+        ("pm_10_0", "PM10.0"),
     )
 
     DEFAULT_COLORS = {
@@ -599,6 +600,72 @@ class PMBarsLayout(DisplayLayout):
         "pm_4_0": (255, 195, 0),
         "pm_10_0": (255, 107, 53),
     }
+
+    @classmethod
+    def _default_label_for_field(cls, field_name: str) -> str:
+        """Return a compact display label for a PM field."""
+        for candidate_field, candidate_label in cls.DEFAULT_FIELDS:
+            if candidate_field == field_name:
+                return candidate_label
+        return field_name.upper()
+
+    def _safe_horizontal_bounds(
+        self,
+        top_y: float,
+        bottom_y: float,
+        *,
+        inset: float = 10.0,
+    ) -> tuple[int, int]:
+        """Return a conservative horizontal span that stays inside the circular mask."""
+        center_x = self.width / 2.0
+        center_y = self.height / 2.0
+        radius = (min(self.width, self.height) / 2.0) - inset
+        offset = max(abs(top_y - center_y), abs(bottom_y - center_y))
+        if offset >= radius:
+            center = int(round(center_x))
+            return center, center
+        half_span = math.sqrt(max(0.0, (radius * radius) - (offset * offset)))
+        return int(center_x - half_span), int(center_x + half_span)
+
+    def _safe_vertical_bounds(
+        self,
+        left_x: float,
+        right_x: float,
+        *,
+        inset: float = 10.0,
+    ) -> tuple[int, int]:
+        """Return a conservative vertical span that stays inside the circular mask."""
+        center_x = self.width / 2.0
+        center_y = self.height / 2.0
+        radius = (min(self.width, self.height) / 2.0) - inset
+        offset = max(abs(left_x - center_x), abs(right_x - center_x))
+        if offset >= radius:
+            center = int(round(center_y))
+            return center, center
+        half_span = math.sqrt(max(0.0, (radius * radius) - (offset * offset)))
+        return int(center_y - half_span), int(center_y + half_span)
+
+    @staticmethod
+    def _draw_fill_segment(
+        draw: ImageDraw.ImageDraw,
+        bounds: tuple[int, int, int, int],
+        *,
+        fill_color: Tuple[int, int, int],
+        radius: int,
+    ) -> None:
+        """Draw a rounded fill segment without overshooting short dimensions."""
+        left, top, right, bottom = bounds
+        if right <= left or bottom <= top:
+            return
+        effective_radius = max(
+            1,
+            min(radius, (right - left) // 2, (bottom - top) // 2),
+        )
+        draw.rounded_rectangle(
+            [(left, top), (right, bottom)],
+            radius=effective_radius,
+            fill=fill_color,
+        )
 
     def render(
         self,
@@ -610,6 +677,8 @@ class PMBarsLayout(DisplayLayout):
         metric_colors: Optional[dict[str, Tuple[int, int, int]]] = None,
         max_value: Optional[float] = None,
         auto_scale_floor: float = 25.0,
+        orientation: str = "horizontal",
+        bar_gap: int = 6,
     ) -> Image.Image:
         """Render four PM bars from the current payload."""
         img = Image.new('RGB', (self.width, self.height), self.bg_color)
@@ -622,7 +691,7 @@ class PMBarsLayout(DisplayLayout):
                 normalized_fields.append((str(item[0]), str(item[1])))
             else:
                 field_name = str(item)
-                normalized_fields.append((field_name, field_name.upper()))
+                normalized_fields.append((field_name, self._default_label_for_field(field_name)))
 
         values = []
         for field_name, _ in normalized_fields:
@@ -633,22 +702,14 @@ class PMBarsLayout(DisplayLayout):
 
         scale_max = max_value or max(auto_scale_floor, max(values or [auto_scale_floor]))
         colors = {**self.DEFAULT_COLORS, **(metric_colors or {})}
+        orientation = str(orientation).lower()
+        gap = max(2, int(bar_gap))
 
         header_top = 14
         header_height = 22
         footer_height = 16
-        content_top = header_top + header_height + 14
+        content_top = header_top + header_height + 10
         content_bottom = self.height - footer_height - 18
-        row_gap = 10
-        row_count = max(1, len(normalized_fields))
-        row_height = max(20, int((content_bottom - content_top - (row_gap * (row_count - 1))) / row_count))
-        label_width = 52
-        value_width = 46
-        bar_left = 16 + label_width + 8
-        bar_right = self.width - 16 - value_width
-        bar_width = max(24, bar_right - bar_left)
-        bar_height = max(10, row_height - 8)
-        bar_radius = max(4, bar_height // 2)
 
         title_font, title_bbox = self.text_renderer.fit_font(
             title,
@@ -665,57 +726,164 @@ class PMBarsLayout(DisplayLayout):
             font=title_font,
         )
 
-        for index, ((field_name, label), value) in enumerate(zip(normalized_fields, values)):
-            row_y = content_top + (index * (row_height + row_gap))
-            bar_y = row_y + ((row_height - bar_height) // 2)
-            row_color = colors.get(field_name, self.color_scheme["accent"])
+        if orientation == "vertical":
+            column_count = max(1, len(normalized_fields))
+            content_left = 24
+            content_right = self.width - 24
+            column_width = max(
+                22,
+                int((content_right - content_left - (gap * (column_count - 1))) / column_count),
+            )
+            total_width = (column_width * column_count) + (gap * (column_count - 1))
+            start_x = (self.width - total_width) // 2
 
-            label_font, label_bbox = self.text_renderer.fit_font(
-                label,
-                20,
-                max_width=label_width,
-                min_size=12,
-                max_height=row_height,
-            )
-            label_width_actual = label_bbox[2] - label_bbox[0]
-            label_x = 16 + max(0, (label_width - label_width_actual) // 2)
-            draw.text(
-                (label_x, row_y - label_bbox[1]),
-                label,
-                fill=self.color_scheme["secondary"],
-                font=label_font,
-            )
+            for index, ((field_name, label), value) in enumerate(zip(normalized_fields, values)):
+                column_left = start_x + (index * (column_width + gap))
+                column_right = column_left + column_width
+                safe_top, safe_bottom = self._safe_vertical_bounds(column_left, column_right, inset=10)
+                safe_top = max(content_top, safe_top + 4)
+                safe_bottom = min(content_bottom, safe_bottom - 4)
+                row_color = colors.get(field_name, self.color_scheme["accent"])
 
-            value_text = f"{value:.1f}"
-            value_font, value_bbox = self.text_renderer.fit_font(
-                value_text,
-                20,
-                max_width=value_width,
-                min_size=12,
-                max_height=row_height,
-            )
-            value_width_actual = value_bbox[2] - value_bbox[0]
-            value_x = self.width - 16 - value_width_actual
-            draw.text(
-                (value_x, row_y - value_bbox[1]),
-                value_text,
-                fill=self.color_scheme["primary"],
-                font=value_font,
-            )
-
-            draw.rounded_rectangle(
-                [(bar_left, bar_y), (bar_left + bar_width, bar_y + bar_height)],
-                radius=bar_radius,
-                outline=self.color_scheme["secondary"],
-                fill=(28, 28, 28),
-            )
-            fill_width = int(bar_width * max(0.0, min(1.0, value / scale_max)))
-            if fill_width > 0:
-                draw.rounded_rectangle(
-                    [(bar_left, bar_y), (bar_left + fill_width, bar_y + bar_height)],
-                    radius=bar_radius,
-                    fill=row_color,
+                value_text = f"{value:.1f}"
+                value_font, value_bbox = self.text_renderer.fit_font(
+                    value_text,
+                    18,
+                    max_width=column_width + 10,
+                    min_size=11,
+                    max_height=20,
                 )
+                value_width_actual = value_bbox[2] - value_bbox[0]
+                value_height = value_bbox[3] - value_bbox[1]
+
+                label_font, label_bbox = self.text_renderer.fit_font(
+                    label,
+                    16,
+                    max_width=column_width + 14,
+                    min_size=10,
+                    max_height=18,
+                )
+                label_width_actual = label_bbox[2] - label_bbox[0]
+                label_height = label_bbox[3] - label_bbox[1]
+
+                value_y = safe_top
+                label_y = safe_bottom - label_height
+                bar_top = value_y + value_height + 6
+                bar_bottom = label_y - 6
+                if bar_bottom - bar_top < 26:
+                    bar_top = value_y + value_height + 3
+                    bar_bottom = max(bar_top + 26, safe_bottom - label_height - 3)
+                if bar_bottom <= bar_top:
+                    continue
+                bar_left = column_left + 2
+                bar_right = column_right - 2
+                bar_radius = max(4, min((bar_right - bar_left) // 2, 10))
+
+                draw.text(
+                    (column_left + ((column_width - value_width_actual) // 2), value_y - value_bbox[1]),
+                    value_text,
+                    fill=self.color_scheme["primary"],
+                    font=value_font,
+                )
+                draw.text(
+                    (column_left + ((column_width - label_width_actual) // 2), label_y - label_bbox[1]),
+                    label,
+                    fill=self.color_scheme["secondary"],
+                    font=label_font,
+                )
+
+                draw.rounded_rectangle(
+                    [(bar_left, bar_top), (bar_right, bar_bottom)],
+                    radius=bar_radius,
+                    outline=self.color_scheme["secondary"],
+                    fill=(28, 28, 28),
+                )
+                bar_height = bar_bottom - bar_top
+                fill_height = int(bar_height * max(0.0, min(1.0, value / scale_max)))
+                if fill_height > 0:
+                    self._draw_fill_segment(
+                        draw,
+                        (
+                            bar_left,
+                            max(bar_top, bar_bottom - fill_height),
+                            bar_right,
+                            bar_bottom,
+                        ),
+                        fill_color=row_color,
+                        radius=bar_radius,
+                    )
+        else:
+            row_count = max(1, len(normalized_fields))
+            row_height = max(20, int((content_bottom - content_top - (gap * (row_count - 1))) / row_count))
+            bar_height = max(10, row_height - 8)
+            bar_radius = max(4, bar_height // 2)
+
+            for index, ((field_name, label), value) in enumerate(zip(normalized_fields, values)):
+                row_y = content_top + (index * (row_height + gap))
+                bar_y = row_y + ((row_height - bar_height) // 2)
+                row_color = colors.get(field_name, self.color_scheme["accent"])
+                safe_left, safe_right = self._safe_horizontal_bounds(row_y, row_y + row_height, inset=10)
+                inner_left = max(16, safe_left + 2)
+                inner_right = min(self.width - 16, safe_right - 2)
+                available_width = max(90, inner_right - inner_left)
+                label_width = min(56, max(44, int(available_width * 0.25)))
+                value_width = min(48, max(36, int(available_width * 0.18)))
+                bar_left = inner_left + label_width + 6
+                bar_right = inner_right - value_width - 6
+                bar_width = max(24, bar_right - bar_left)
+
+                label_font, label_bbox = self.text_renderer.fit_font(
+                    label,
+                    18,
+                    max_width=label_width,
+                    min_size=11,
+                    max_height=row_height,
+                )
+                label_width_actual = label_bbox[2] - label_bbox[0]
+                label_x = inner_left + max(0, (label_width - label_width_actual) // 2)
+                draw.text(
+                    (label_x, row_y - label_bbox[1]),
+                    label,
+                    fill=self.color_scheme["secondary"],
+                    font=label_font,
+                )
+
+                value_text = f"{value:.1f}"
+                value_font, value_bbox = self.text_renderer.fit_font(
+                    value_text,
+                    18,
+                    max_width=value_width,
+                    min_size=11,
+                    max_height=row_height,
+                )
+                value_width_actual = value_bbox[2] - value_bbox[0]
+                value_x = inner_right - value_width_actual
+                draw.text(
+                    (value_x, row_y - value_bbox[1]),
+                    value_text,
+                    fill=self.color_scheme["primary"],
+                    font=value_font,
+                )
+
+                draw.rounded_rectangle(
+                    [(bar_left, bar_y), (bar_left + bar_width, bar_y + bar_height)],
+                    radius=bar_radius,
+                    outline=self.color_scheme["secondary"],
+                    fill=(28, 28, 28),
+                )
+                fill_width = int(bar_width * max(0.0, min(1.0, value / scale_max)))
+                if fill_width > 0:
+                    self._draw_fill_segment(
+                        draw,
+                        (
+                            bar_left,
+                            bar_y,
+                            min(bar_left + fill_width, bar_left + bar_width),
+                            bar_y + bar_height,
+                        ),
+                        fill_color=row_color,
+                        radius=bar_radius,
+                    )
 
         unit_font, unit_bbox = self.text_renderer.fit_font(
             unit_label,

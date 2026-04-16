@@ -323,6 +323,17 @@ def test_layout_extensions():
     )
     save_test_image(pm_img, "/tmp/test_layout_pm_bars.png")
 
+    pm_vertical_img = pm_layout.render(
+        {
+            "pm_1_0": 3.7,
+            "pm_2_5": 9.4,
+            "pm_4_0": 14.8,
+            "pm_10_0": 18.1,
+        },
+        orientation="vertical",
+    )
+    save_test_image(pm_vertical_img, "/tmp/test_layout_pm_bars_vertical.png")
+
     ring_layout = MetricRingLayout(font_path=load_metric_font_path())
     ring_img = ring_layout.render(
         27.3,
