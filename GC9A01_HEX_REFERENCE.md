@@ -323,12 +323,8 @@ The 0x80 flag in Adafruit's byte count means "add mandatory 150ms delay after co
 
 ## Conclusion
 
-**Our implementation is 95% correct** but missing these critical elements:
+The current mainline driver no longer uses the older handwritten init path described in the
+original issue-analysis docs. It now runs a packed Adafruit-style initialization sequence in
+`src/rpi_watch/display/gc9a01_spi.py`, and the older fix-tracking notes have been removed.
 
-1. **0xEF/0xFE register unlock** before undocumented registers
-2. **0x21 INVON command** before SLPOUT (CAUSES GREY COLOR ISSUE)
-3. **Extra 0x13 NORMAL_ON** that shouldn't be there
-
-Fix these three issues and the display should output proper colors.
-
-See `GC9A01_ISSUE_ANALYSIS.md` for detailed fix instructions.
+This file is kept only as a low-level hex/register reference.
