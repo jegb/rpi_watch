@@ -1,350 +1,187 @@
-# RPi Watch - GC9A01 I2C Display with MQTT Integration
+# RPi Watch
 
-A Python application for Raspberry Pi that displays real-time metrics on a GC9A01 circular 240x240 RGB display (I2C variant) sourced from an MQTT broker.
+RPi Watch is a Raspberry Pi app that renders MQTT metrics onto a 240x240 GC9A01 round SPI display.
 
-## Features
+Current working display modes:
+- single metric with title, unit, and trailing sparkline
+- PM bars for `pm_1_0`, `pm_2_5`, `pm_4_0`, and `pm_10_0`
+- configurable metric ring with threshold-based color gradient
 
-- **I2C Display Driver**: Custom driver for GC9A01 circular display via I2C protocol
-- **MQTT Integration**: Real-time metric updates from local MQTT broker
-- **Circular Rendering**: PIL-based rendering with circular masking for round display
-- **Thread-Safe**: Non-blocking MQTT subscriber with thread-safe metric storage
-- **Configuration-Driven**: YAML-based configuration for display, MQTT, and metrics
-- **Production Grade**: Proper logging, error handling, and graceful shutdown
+The app subscribes once to one MQTT topic, stores the full payload plus recent history, and chooses what to render locally.
 
-## Hardware Requirements
+Current hardware display state:
 
-- **Raspberry Pi** (v3, v4, or v5)
-- **GC9A01 I2C Display** (240x240 circular, I2C variant)
-  - VCC: 3.3V or 5V (check your display specs)
-  - GND: Ground
-  - SDA: I2C Data (GPIO 2 / I2C bus 1)
-  - SCL: I2C Clock (GPIO 3 / I2C bus 1)
-- **MQTT Broker** on local network (e.g., Mosquitto)
+![RPi Watch display on hardware](docs/images/mqtt-listener-display.png)
 
-## Installation
+## Hardware
 
-### 1. System Setup (One-time)
+- Raspberry Pi with SPI enabled
+- GC9A01 round SPI display
+- MQTT broker reachable on the local network
+
+Recommended wiring for the current config:
+
+| Display | Pi BCM | Header Pin |
+|---|---:|---:|
+| `SCLK` | `GPIO11` | `23` |
+| `MOSI` | `GPIO10` | `19` |
+| `CS` | `GPIO8` | `24` |
+| `DC` | `GPIO25` | `22` |
+| `RST` | `GPIO27` | `13` |
+| `BLK` | `GPIO18` | `12` |
+| `VCC` | `3V3` | `1` |
+| `GND` | `GND` | `6` |
+
+## Quickstart
+
+Enable SPI first:
 
 ```bash
-# Clone or setup the project directory
-cd ~/rpi_watch
-
-# Run system setup script (enables I2C, installs dependencies)
-sudo bash scripts/setup_i2c.sh
-
-# Reboot to apply changes
-sudo reboot
+sudo raspi-config
 ```
 
-The renderer expects a scalable system font. The setup script installs the default font packages used by `config/config.yaml`:
+Then install system dependencies:
+
+```bash
+sudo bash setup.sh
+```
+
+The renderer expects a scalable system font and `setup.sh` installs the default one used by `config/config.yaml`:
 
 ```bash
 sudo apt-get install -y fonts-dejavu-core fontconfig
-```
-
-### 2. Verify I2C Hardware
-
-After reboot, verify your display is detected:
-
-```bash
-# Scan I2C bus for devices
-i2cdetect -y 1
-
-# Output should show something like:
-#      0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
-# 00:          -- -- -- -- -- -- -- -- -- -- -- -- --
-# 10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-# 20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-# 30: -- -- -- -- -- -- -- -- -- -- -- 3c -- -- -- --  <- Your display!
-```
-
-**Note the display address** (e.g., 0x3C). You'll need this in the config.
-
-### 3. Python Environment
-
-```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install Python dependencies
-pip install -r requirements.txt
-```
-
-Verify the default renderer font exists:
-
-```bash
 ls /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
 fc-match "DejaVu Sans:style=Bold"
 ```
 
-### 4. Configuration
+Install Python dependencies:
 
-Edit `config/config.yaml`:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+```
+
+Run the app:
+
+```bash
+PYTHONPATH=src python3 -m rpi_watch.main
+```
+
+## Configuration
+
+Primary runtime config is [config.yaml](/Users/gallar/Documents/workspace/rpi_watch/config/config.yaml).
+
+Key sections:
+- `display`: SPI bus, control pins, refresh rate, `madctl`
+- `mqtt`: broker host, port, topic, QoS
+- `metric_display`: layout mode, fonts, labels, sparkline settings, PM bar colors, ring thresholds
+
+The current layout switch is:
 
 ```yaml
-display:
-  i2c_address: 0x3C          # Change if needed (from i2cdetect output)
-  i2c_bus: 1
-  width: 240
-  height: 240
-  rotation: 0
-  refresh_rate_hz: 2
-
-mqtt:
-  broker_host: "192.168.1.100"  # Your MQTT broker IP
-  broker_port: 1883
-  topic: "sensor/metric"
-  qos: 1
-  keepalive: 60
-
 metric_display:
-  decimal_places: 1
-  font_size: 80              # Adjust for readability
-  unit_label: "°C"           # Optional unit
-  text_color: [255, 255, 255]
-  background_color: [0, 0, 0]
+  layout_mode: "single_metric"   # single_metric, pm_bars, metric_ring
 ```
 
-## Testing
+Examples:
 
-### Test I2C Bus Communication
+```yaml
+metric_display:
+  layout_mode: "single_metric"
+  metric_key: "pm_2_5"
+  show_sparkline: true
+  sparkline_points: 10
+```
+
+```yaml
+metric_display:
+  layout_mode: "pm_bars"
+  pm_bars_title: "PARTICLES"
+  pm_bars_unit_label: "µg/m³"
+```
+
+```yaml
+metric_display:
+  layout_mode: "metric_ring"
+  ring_field: "temp"
+  ring_min_value: 0.0
+  ring_max_value: 40.0
+  ring_start_angle: 135.0
+  ring_end_angle: 405.0
+```
+
+## Testing And Demos
+
+Render components individually:
 
 ```bash
-source venv/bin/activate
-python3 scripts/test_i2c_bus.py
+PYTHONPATH=src python3 scripts/test_components.py
 ```
 
-Expected output:
-```
-✓ smbus2 library available
-Scanning I2C bus 1 for device at 0x3C...
-✓ Device detected at 0x3C
-✓ I2C communication successful!
-```
-
-### Test Display Initialization
+Render layout demos to `/tmp`:
 
 ```bash
-python3 scripts/test_display_init.py
+PYTHONPATH=src python3 scripts/demo_layouts.py
 ```
 
-This will display test numbers on your screen. If you see numbers appear, hardware is working!
-
-## Running the Application
+Check MQTT from the watch Pi:
 
 ```bash
-# Activate virtual environment
-source venv/bin/activate
-
-# Run the application
-python3 -m rpi_watch.main
+PYTHONPATH=src python3 scripts/test_mqtt_subscription.py --timeout 20
 ```
-
-Expected output:
-```
-2026-04-15 12:00:00 - rpi_watch.main - INFO - Initializing RPi Watch application
-2026-04-15 12:00:00 - rpi_watch.display.gc9a01_i2c - INFO - GC9A01_I2C driver initialized
-2026-04-15 12:00:00 - rpi_watch.display.renderer - INFO - MetricRenderer initialized
-2026-04-15 12:00:00 - rpi_watch.mqtt.subscriber - INFO - MQTTSubscriber initialized
-2026-04-15 12:00:00 - rpi_watch.main - INFO - All components initialized successfully
-2026-04-15 12:00:00 - rpi_watch.main - INFO - Starting main event loop
-2026-04-15 12:00:01 - rpi_watch.mqtt.subscriber - INFO - Connected to MQTT broker
-2026-04-15 12:00:01 - rpi_watch.mqtt.subscriber - INFO - Subscribed to topic: sensor/metric
-2026-04-15 12:00:02 - rpi_watch.main - INFO - Waiting for MQTT metric...
-```
-
-The application will display a "..." waiting message until the first metric arrives.
-
-### Publishing Test Metrics
-
-From another terminal or device, publish a metric:
-
-```bash
-# Using mosquitto_pub
-mosquitto_pub -h 192.168.1.100 -t sensor/metric -m "23.5"
-
-# Or as JSON
-mosquitto_pub -h 192.168.1.100 -t sensor/metric -m '{"value": 23.5}'
-```
-
-The display should immediately update with the value.
 
 ## Project Structure
 
-```
+```text
 rpi_watch/
-├── README.md
-├── requirements.txt
 ├── config/
 │   └── config.yaml
-├── src/
-│   └── rpi_watch/
-│       ├── __init__.py
-│       ├── main.py
-│       ├── display/
-│       │   ├── gc9a01_i2c.py       # I2C driver
-│       │   └── renderer.py         # PIL rendering
-│       ├── mqtt/
-│       │   └── subscriber.py       # MQTT client
-│       ├── metrics/
-│       │   └── metric_store.py     # Thread-safe storage
-│       └── utils/
-│           └── logging_config.py
-└── scripts/
-    ├── setup_i2c.sh
-    ├── test_i2c_bus.py
-    └── test_display_init.py
+├── src/rpi_watch/
+│   ├── main.py
+│   ├── display/
+│   │   ├── gc9a01_spi.py
+│   │   ├── renderer.py
+│   │   ├── components.py
+│   │   ├── layouts.py
+│   │   └── fonts.py
+│   ├── metrics/
+│   │   └── metric_store.py
+│   └── mqtt/
+│       └── subscriber.py
+├── scripts/
+│   ├── demo_layouts.py
+│   ├── test_components.py
+│   └── test_mqtt_subscription.py
+├── setup.sh
+├── SETUP_GUIDE.md
+└── TODO.md
 ```
-
-## Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| smbus2 | ≥0.4.2 | I2C communication |
-| Pillow | ≥10.0.0 | Image rendering |
-| paho-mqtt | ≥2.1.0 | MQTT client |
-| PyYAML | ≥6.0 | Configuration |
 
 ## Troubleshooting
 
-### I2C Bus Not Found
-```
-Error: I2C bus 1 not found
-```
+If text renders tiny or glyphs are broken:
 
-**Solution:**
-1. Run `sudo raspi-config` → Interfacing Options → I2C → Enable
-2. Reboot: `sudo reboot`
-3. Verify: `ls -l /dev/i2c*` should show `/dev/i2c-1`
-
-### Display Not Detected
-```
-Error: Device not detected at 0x3C
-```
-
-**Solution:**
-1. Check physical wiring (SDA/SCL/VCC/GND)
-2. Verify power supply (adequate current)
-3. Try `i2cdetect -y 1` to find actual address
-4. Update `config.yaml` with correct address
-5. Check if address needs pull-up resistors (typically 4.7kΩ)
-
-### No MQTT Connection
-```
-Error: Failed to connect to MQTT broker
-```
-
-**Solution:**
-1. Verify broker IP: `ping 192.168.1.100`
-2. Verify broker is running: `mosquitto -v`
-3. Check firewall allows port 1883
-4. Verify network connectivity: `ip addr`
-
-### Display Shows Garbled Text
-```
-Display shows pixels but no readable text
-```
-
-**Solution:**
-1. Adjust `font_size` in config.yaml (try 100+)
-2. Check `font_path` points to valid TrueType font
-3. Verify color settings (text/background contrast)
-4. Try test script: `python3 scripts/test_display_init.py`
-
-### Text Is Tiny Or Uses Placeholder Glyphs
-```
+```text
 WARNING - No scalable font source could be loaded
 ```
 
-**Solution:**
-1. Install the renderer font packages: `sudo apt-get install -y fonts-dejavu-core fontconfig`
-2. Verify the default font path exists: `ls /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`
-3. Check fontconfig can resolve it: `fc-match "DejaVu Sans:style=Bold"`
-4. If you use a custom font, update `metric_display.font_path` in `config/config.yaml`
-
-## Running as a Service (Optional)
-
-Create systemd service file at `/etc/systemd/system/rpi_watch.service`:
-
-```ini
-[Unit]
-Description=RPi Watch - GC9A01 MQTT Display
-After=network.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/rpi_watch
-Environment="PATH=/home/pi/rpi_watch/venv/bin"
-ExecStart=/home/pi/rpi_watch/venv/bin/python3 -m rpi_watch.main
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then enable and start:
+Install and verify the default font:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable rpi_watch
-sudo systemctl start rpi_watch
-sudo systemctl status rpi_watch
+sudo apt-get install -y fonts-dejavu-core fontconfig
+ls /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+fc-match "DejaVu Sans:style=Bold"
 ```
 
-View logs:
+If MQTT connects but no values appear, verify the broker and topic independently:
 
 ```bash
-sudo journalctl -u rpi_watch -f
+mosquitto_sub -h 192.168.0.214 -t airquality/sensor -v
 ```
 
-## Performance Notes
+## Additional Docs
 
-- **I2C Speed**: Runs at standard 100 kHz (check if your RPi supports 400 kHz for faster refresh)
-- **Frame Rate**: 2 Hz default (adjustable via `refresh_rate_hz` in config)
-- **Update Only on Change**: Display only updates when metric value changes (reduces I2C traffic)
-- **Frame Buffer**: ~180 KB per frame (RGB565 format)
-
-## Known Limitations
-
-1. **I2C-variant GC9A01 is rare**: Most GC9A01 displays use SPI. Verify your hardware is I2C before purchasing.
-2. **Register map may vary**: Different I2C GC9A01 implementations may use different register addresses. Consult your display datasheet.
-3. **Single metric**: Currently displays one metric value. Multiple metrics would require additional rendering logic.
-
-## MQTT Message Format
-
-The subscriber accepts metrics in multiple formats:
-
-```
-# Simple numeric value
-mosquitto_pub -h broker -t sensor/metric -m "23.5"
-
-# JSON with value field
-mosquitto_pub -h broker -t sensor/metric -m '{"value": 23.5}'
-
-# JSON with other fields (uses first numeric value)
-mosquitto_pub -h broker -t sensor/metric -m '{"temperature": 23.5, "humidity": 45}'
-```
-
-## License
-
-MIT License - See LICENSE file for details
-
-## Contributing
-
-Contributions welcome! Areas for improvement:
-- Add support for SPI-variant GC9A01 displays
-- Multi-metric display support
-- Custom animations/transitions
-- Web dashboard for configuration
-- Bluetooth support for metric source
-
-## Support
-
-For issues or questions:
-1. Check the Troubleshooting section above
-2. Review logs: `journalctl -u rpi_watch -n 50`
-3. Run test scripts: `test_i2c_bus.py`, `test_display_init.py`
-4. Check GitHub issues: https://github.com/yourusername/rpi_watch/issues
+- [SETUP_GUIDE.md](/Users/gallar/Documents/workspace/rpi_watch/SETUP_GUIDE.md): step-by-step Pi setup
+- [TODO.md](/Users/gallar/Documents/workspace/rpi_watch/TODO.md): backlog, including animated metric rotation
