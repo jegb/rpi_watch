@@ -19,9 +19,11 @@ from rpi_watch.display.components import (
     TextSize,
     TextAlignment,
     TextRenderer,
+    SparklineRenderer,
     CircularGauge,
     ProgressBar,
 )
+from rpi_watch.display.layouts import MetricRingLayout, PMBarsLayout
 from rpi_watch.utils import setup_logging
 
 setup_logging('INFO')
@@ -254,10 +256,94 @@ def test_circular_progress():
     logger.info("✓ Circular progress indicator tests passed")
 
 
+def test_sparkline_rendering():
+    """Test sparkline rendering from trailing values."""
+    logger.info("\n" + "=" * 70)
+    logger.info("TEST 7: Sparkline Rendering")
+    logger.info("=" * 70)
+
+    sparkline = SparklineRenderer(width=240, height=48, padding=6)
+    img = sparkline.render(
+        [8.2, 9.1, 7.8, 10.4, 11.0, 10.1, 9.7, 8.9, 7.6, 8.4],
+        background_color=(0, 0, 0),
+        line_color=(92, 172, 255),
+        fill_color=(18, 40, 74),
+    )
+    save_test_image(img, "/tmp/test_sparkline_pm25.png")
+
+    logger.info("✓ Sparkline rendering tests passed")
+
+
+def test_gradient_ring_rendering():
+    """Test configurable threshold-gradient ring rendering."""
+    logger.info("\n" + "=" * 70)
+    logger.info("TEST 8: Gradient Ring Rendering")
+    logger.info("=" * 70)
+
+    gauge = CircularGauge(
+        width=240,
+        height=240,
+        outer_radius=108,
+        font_path=load_metric_font_path(),
+    )
+    img = gauge.render_gradient_ring(
+        26.5,
+        min_value=0.0,
+        max_value=40.0,
+        start_angle=135.0,
+        end_angle=405.0,
+        thickness=16,
+        track_color=(40, 40, 40),
+        thresholds=[
+            {"value": 0.0, "color": [64, 128, 255]},
+            {"value": 22.0, "color": [0, 220, 120]},
+            {"value": 35.0, "color": [255, 96, 64]},
+        ],
+    )
+    save_test_image(img, "/tmp/test_gradient_ring_temp.png")
+
+    logger.info("✓ Gradient ring rendering tests passed")
+
+
+def test_layout_extensions():
+    """Test PM bars and metric ring layouts."""
+    logger.info("\n" + "=" * 70)
+    logger.info("TEST 9: Extended Layouts")
+    logger.info("=" * 70)
+
+    pm_layout = PMBarsLayout(font_path=load_metric_font_path())
+    pm_img = pm_layout.render(
+        {
+            "pm_1_0": 3.7,
+            "pm_2_5": 9.4,
+            "pm_4_0": 14.8,
+            "pm_10_0": 18.1,
+        }
+    )
+    save_test_image(pm_img, "/tmp/test_layout_pm_bars.png")
+
+    ring_layout = MetricRingLayout(font_path=load_metric_font_path())
+    ring_img = ring_layout.render(
+        27.3,
+        title="TEMP",
+        unit="°C",
+        min_value=0.0,
+        max_value=40.0,
+        thresholds=[
+            {"value": 0.0, "color": [64, 128, 255]},
+            {"value": 22.0, "color": [0, 220, 120]},
+            {"value": 35.0, "color": [255, 96, 64]},
+        ],
+    )
+    save_test_image(ring_img, "/tmp/test_layout_metric_ring.png")
+
+    logger.info("✓ Extended layout tests passed")
+
+
 def test_combined_layouts():
     """Test combined component layouts."""
     logger.info("\n" + "=" * 70)
-    logger.info("TEST 7: Combined Component Layouts")
+    logger.info("TEST 10: Combined Component Layouts")
     logger.info("=" * 70)
 
     # Layout 1: Main metric with gauge
@@ -291,7 +377,7 @@ def test_combined_layouts():
 def test_color_variations():
     """Test different color schemes."""
     logger.info("\n" + "=" * 70)
-    logger.info("TEST 8: Color Variations")
+    logger.info("TEST 11: Color Variations")
     logger.info("=" * 70)
 
     renderer = TextRenderer(font_path=load_metric_font_path())
@@ -333,6 +419,9 @@ def main():
         test_multi_ring_gauge()
         test_linear_progress()
         test_circular_progress()
+        test_sparkline_rendering()
+        test_gradient_ring_rendering()
+        test_layout_extensions()
         test_combined_layouts()
         test_color_variations()
 

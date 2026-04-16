@@ -20,7 +20,9 @@ from rpi_watch.display.layouts import (
     get_layout,
     LargeMetricLayout,
     MetricWithGaugeLayout,
+    MetricRingLayout,
     MultiRingGaugeLayout,
+    PMBarsLayout,
     TextOverGaugeLayout,
     SplitMetricsLayout,
     RadialDashboardLayout,
@@ -405,6 +407,31 @@ def demo_sps_monitor_integration():
     img = layout.render(metrics=metrics, max_value=100)
     img.save("/tmp/demo_sps_progress_stack.png")
     logger.info("✓ Saved: /tmp/demo_sps_progress_stack.png")
+
+    # Layout 6: Dedicated PM bars
+    logger.info("\nLayout 6: PM Bars")
+    layout = PMBarsLayout(color_scheme=ColorScheme.BRIGHT, font_path=load_metric_font_path())
+    img = layout.render(sps_data)
+    img.save("/tmp/demo_sps_pm_bars.png")
+    logger.info("✓ Saved: /tmp/demo_sps_pm_bars.png")
+
+    # Layout 7: Temperature ring
+    logger.info("\nLayout 7: Temperature Ring")
+    layout = MetricRingLayout(color_scheme=ColorScheme.OCEAN, font_path=load_metric_font_path())
+    img = layout.render(
+        sps_data["temp"],
+        title="TEMP",
+        unit="°C",
+        min_value=0.0,
+        max_value=40.0,
+        thresholds=[
+            {"value": 0.0, "color": [64, 128, 255]},
+            {"value": 22.0, "color": [0, 220, 120]},
+            {"value": 35.0, "color": [255, 96, 64]},
+        ],
+    )
+    img.save("/tmp/demo_sps_temp_ring.png")
+    logger.info("✓ Saved: /tmp/demo_sps_temp_ring.png")
 
 
 def main():

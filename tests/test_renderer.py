@@ -91,6 +91,18 @@ class TestMetricRenderer(unittest.TestCase):
         self.assertIsInstance(image, Image.Image)
         self.assertEqual(image.size, (240, 240))
 
+    def test_render_metric_with_sparkline(self):
+        """Test rendering a metric with trailing sparkline history."""
+        image = self.renderer.render_metric(
+            26.4,
+            decimal_places=1,
+            title_label="TEMP",
+            unit_label="°C",
+            sparkline_values=[24.2, 24.8, 25.5, 26.1, 26.4],
+        )
+        self.assertIsInstance(image, Image.Image)
+        self.assertEqual(image.size, (240, 240))
+
     def test_apply_circular_mask(self):
         """Test circular mask application."""
         # Create a simple test image

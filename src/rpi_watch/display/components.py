@@ -7,7 +7,8 @@ Provides reusable components for rendering:
 """
 
 import logging
-from typing import Tuple, Optional
+import math
+from typing import Any, Optional, Sequence, Tuple
 from enum import Enum
 
 from PIL import Image, ImageDraw, ImageFont
@@ -78,6 +79,37 @@ class TextRenderer:
         if size not in self.fonts:
             self.fonts[size] = self._load_font(self.font_path, size)
         return self.fonts[size]
+
+    def measure_text(
+        self,
+        text: str,
+        font: ImageFont.FreeTypeFont,
+    ) -> tuple[tuple[int, int, int, int], int, int]:
+        """Measure text using a temporary drawing context."""
+        img = Image.new('RGB', (self.width, self.height), (0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox, bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    def fit_font(
+        self,
+        text: str,
+        base_size: int,
+        *,
+        max_width: int,
+        min_size: int = 12,
+        max_height: Optional[int] = None,
+    ) -> tuple[ImageFont.FreeTypeFont, tuple[int, int, int, int]]:
+        """Shrink a font until the text fits the target bounds."""
+        for size in range(base_size, max(min_size, 1) - 1, -2):
+            font = self._get_font(size)
+            bbox, text_width, text_height = self.measure_text(text, font)
+            if text_width <= max_width and (max_height is None or text_height <= max_height):
+                return font, bbox
+
+        font = self._get_font(max(min_size, 1))
+        bbox, _, _ = self.measure_text(text, font)
+        return font, bbox
 
     def get_font(self, size: int | TextSize) -> ImageFont.FreeTypeFont:
         """Get a font for a requested size or preset."""
@@ -209,6 +241,100 @@ class TextRenderer:
             draw.text((detail_x, detail_y), detail_text, fill=detail_color, font=detail_font)
 
         logger.debug(f"Rendered multiline text: '{main_text}'")
+        return img
+
+
+class SparklineRenderer:
+    """Renders a compact sparkline for recent metric history."""
+
+    def __init__(
+        self,
+        width: int = 240,
+        height: int = 40,
+        padding: int = 4,
+    ):
+        self.width = width
+        self.height = height
+        self.padding = padding
+
+    @staticmethod
+    def _normalize_values(series: Sequence[Any]) -> list[float]:
+        """Normalize either raw values or ``(timestamp, value)`` pairs."""
+        values: list[float] = []
+        for item in series:
+            if isinstance(item, tuple) and len(item) >= 2:
+                value = item[1]
+            else:
+                value = item
+            try:
+                values.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        return values
+
+    def render(
+        self,
+        series: Sequence[Any],
+        *,
+        background_color: Tuple[int, int, int] = (0, 0, 0),
+        line_color: Tuple[int, int, int] = (255, 255, 255),
+        fill_color: Optional[Tuple[int, int, int]] = None,
+        stroke_width: int = 2,
+        point_radius: int = 2,
+    ) -> Image.Image:
+        """Render a sparkline image from the supplied history."""
+        img = Image.new('RGB', (self.width, self.height), background_color)
+        draw = ImageDraw.Draw(img)
+
+        values = self._normalize_values(series)
+        if not values:
+            return img
+
+        if len(values) == 1:
+            x = self.width // 2
+            y = self.height // 2
+            draw.ellipse(
+                [
+                    (x - point_radius, y - point_radius),
+                    (x + point_radius, y + point_radius),
+                ],
+                fill=line_color,
+            )
+            return img
+
+        min_value = min(values)
+        max_value = max(values)
+        value_range = max_value - min_value
+        usable_width = max(1, self.width - (self.padding * 2))
+        usable_height = max(1, self.height - (self.padding * 2))
+        base_y = self.height - self.padding - 1
+
+        points: list[tuple[float, float]] = []
+        for index, value in enumerate(values):
+            ratio_x = index / max(1, len(values) - 1)
+            x = self.padding + (usable_width * ratio_x)
+            if value_range == 0:
+                y = self.padding + (usable_height / 2)
+            else:
+                ratio_y = (value - min_value) / value_range
+                y = self.padding + usable_height - (usable_height * ratio_y)
+            points.append((x, y))
+
+        if fill_color and len(points) >= 2:
+            polygon = [(points[0][0], base_y)] + points + [(points[-1][0], base_y)]
+            draw.polygon(polygon, fill=fill_color)
+
+        draw.line(points, fill=line_color, width=stroke_width)
+
+        last_x, last_y = points[-1]
+        draw.ellipse(
+            [
+                (last_x - point_radius, last_y - point_radius),
+                (last_x + point_radius, last_y + point_radius),
+            ],
+            fill=line_color,
+        )
+
         return img
 
 
@@ -425,6 +551,152 @@ class CircularGauge:
                 draw.line([(x1, y1), (x, y)], fill=color, width=width)
                 x1, y1 = x, y
 
+    @staticmethod
+    def _clamp(value: float, min_value: float, max_value: float) -> float:
+        """Clamp a value to the supplied range."""
+        return max(min_value, min(max_value, value))
+
+    @staticmethod
+    def _normalize_arc_angles(angle_start: float, angle_end: float) -> tuple[float, float]:
+        """Normalize an arc span so ``angle_end`` is always ahead of ``angle_start``."""
+        normalized_end = angle_end
+        while normalized_end <= angle_start:
+            normalized_end += 360.0
+        return angle_start, normalized_end
+
+    @staticmethod
+    def _interpolate_color(
+        color_a: Tuple[int, int, int],
+        color_b: Tuple[int, int, int],
+        ratio: float,
+    ) -> Tuple[int, int, int]:
+        """Linearly interpolate between two RGB colors."""
+        clamped = max(0.0, min(1.0, ratio))
+        return tuple(
+            int(round(channel_a + ((channel_b - channel_a) * clamped)))
+            for channel_a, channel_b in zip(color_a, color_b)
+        )
+
+    @classmethod
+    def _resolve_thresholds(
+        cls,
+        thresholds: Optional[Sequence[Any]],
+        min_value: float,
+        max_value: float,
+    ) -> list[tuple[float, Tuple[int, int, int]]]:
+        """Normalize threshold definitions into sorted ``(value, color)`` pairs."""
+        if not thresholds:
+            return [
+                (min_value, (64, 128, 255)),
+                (((min_value + max_value) / 2.0), (0, 220, 120)),
+                (max_value, (255, 96, 64)),
+            ]
+
+        normalized: list[tuple[float, Tuple[int, int, int]]] = []
+        for threshold in thresholds:
+            if isinstance(threshold, dict):
+                raw_value = threshold.get("value")
+                raw_color = threshold.get("color")
+            elif isinstance(threshold, (tuple, list)) and len(threshold) >= 2:
+                raw_value, raw_color = threshold[0], threshold[1]
+            else:
+                continue
+
+            try:
+                color = tuple(int(channel) for channel in raw_color[:3])
+                normalized.append((float(raw_value), color))
+            except (TypeError, ValueError):
+                continue
+
+        if not normalized:
+            return cls._resolve_thresholds(None, min_value, max_value)
+
+        normalized.sort(key=lambda item: item[0])
+        return normalized
+
+    @classmethod
+    def color_from_thresholds(
+        cls,
+        value: float,
+        thresholds: Optional[Sequence[Any]],
+        *,
+        min_value: float,
+        max_value: float,
+    ) -> Tuple[int, int, int]:
+        """Resolve a color from a threshold-gradient definition."""
+        stops = cls._resolve_thresholds(thresholds, min_value, max_value)
+        clamped_value = cls._clamp(value, min_value, max_value)
+
+        if clamped_value <= stops[0][0]:
+            return stops[0][1]
+        if clamped_value >= stops[-1][0]:
+            return stops[-1][1]
+
+        for (left_value, left_color), (right_value, right_color) in zip(stops, stops[1:]):
+            if left_value <= clamped_value <= right_value:
+                span = right_value - left_value
+                ratio = 0.0 if span == 0 else (clamped_value - left_value) / span
+                return cls._interpolate_color(left_color, right_color, ratio)
+
+        return stops[-1][1]
+
+    @staticmethod
+    def _point_on_circle(
+        center_x: int,
+        center_y: int,
+        radius: int,
+        angle: float,
+    ) -> tuple[float, float]:
+        """Return the centerline point on a circle for a given angle."""
+        angle_rad = math.radians(angle)
+        return (
+            center_x + (radius * math.cos(angle_rad)),
+            center_y + (radius * math.sin(angle_rad)),
+        )
+
+    def _draw_arc_segment(
+        self,
+        draw: ImageDraw.ImageDraw,
+        *,
+        center_x: int,
+        center_y: int,
+        radius: int,
+        angle_start: float,
+        angle_end: float,
+        color: Tuple[int, int, int],
+        width: int,
+        rounded_caps: bool = False,
+    ) -> None:
+        """Draw an arc segment with optional rounded caps."""
+        angle_start, angle_end = self._normalize_arc_angles(angle_start, angle_end)
+        sweep = angle_end - angle_start
+
+        if sweep <= 0:
+            return
+
+        steps = max(int(abs(sweep) * 2), 8)
+        points = [
+            self._point_on_circle(
+                center_x,
+                center_y,
+                radius,
+                angle_start + (sweep * (index / steps)),
+            )
+            for index in range(steps + 1)
+        ]
+        draw.line(points, fill=color, width=width)
+
+        if rounded_caps:
+            cap_radius = max(1, width // 2)
+            for cap_x, cap_y in (points[0], points[-1]):
+                draw.ellipse(
+                    [
+                        (cap_x - cap_radius, cap_y - cap_radius),
+                        (cap_x + cap_radius, cap_y + cap_radius),
+                    ],
+                    fill=color,
+                )
+
     def _draw_needle(
         self,
         draw: ImageDraw.ImageDraw,
@@ -538,6 +810,96 @@ class CircularGauge:
         )
 
         logger.debug(f"Rendered multi-ring gauge with {len(values)} rings")
+        return img
+
+    def render_gradient_ring(
+        self,
+        value: float,
+        *,
+        min_value: float = 0.0,
+        max_value: float = 100.0,
+        thresholds: Optional[Sequence[Any]] = None,
+        start_angle: float = 135.0,
+        end_angle: float = 405.0,
+        thickness: int = 12,
+        background_color: Tuple[int, int, int] = (0, 0, 0),
+        track_color: Tuple[int, int, int] = (45, 45, 45),
+        rounded_caps: bool = True,
+    ) -> Image.Image:
+        """Render a configurable progress ring using threshold-based gradient colors."""
+        img = Image.new('RGB', (self.width, self.height), background_color)
+        draw = ImageDraw.Draw(img)
+
+        start_angle, end_angle = self._normalize_arc_angles(start_angle, end_angle)
+        sweep = end_angle - start_angle
+        clamped_value = self._clamp(value, min_value, max_value)
+        ratio = 0.0 if max_value == min_value else (clamped_value - min_value) / (max_value - min_value)
+        progress_end = start_angle + (sweep * ratio)
+
+        ring_radius = self.outer_radius - max(2, thickness // 2)
+        self._draw_arc_segment(
+            draw,
+            center_x=self.center_x,
+            center_y=self.center_y,
+            radius=ring_radius,
+            angle_start=start_angle,
+            angle_end=end_angle,
+            color=track_color,
+            width=thickness,
+            rounded_caps=rounded_caps,
+        )
+
+        if ratio <= 0:
+            return img
+
+        steps = max(int(abs(progress_end - start_angle) * 2), 8)
+        for index in range(steps):
+            segment_start = start_angle + ((progress_end - start_angle) * (index / steps))
+            segment_end = start_angle + ((progress_end - start_angle) * ((index + 1) / steps))
+            midpoint_ratio = (index + 0.5) / steps
+            midpoint_value = min_value + ((clamped_value - min_value) * midpoint_ratio)
+            segment_color = self.color_from_thresholds(
+                midpoint_value,
+                thresholds,
+                min_value=min_value,
+                max_value=max_value,
+            )
+            self._draw_arc_segment(
+                draw,
+                center_x=self.center_x,
+                center_y=self.center_y,
+                radius=ring_radius,
+                angle_start=segment_start,
+                angle_end=segment_end,
+                color=segment_color,
+                width=thickness,
+                rounded_caps=False,
+            )
+
+        if rounded_caps:
+            cap_radius = max(1, thickness // 2)
+            start_color = self.color_from_thresholds(
+                min_value,
+                thresholds,
+                min_value=min_value,
+                max_value=max_value,
+            )
+            end_color = self.color_from_thresholds(
+                clamped_value,
+                thresholds,
+                min_value=min_value,
+                max_value=max_value,
+            )
+            for angle, color in ((start_angle, start_color), (progress_end, end_color)):
+                cap_x, cap_y = self._point_on_circle(self.center_x, self.center_y, ring_radius, angle)
+                draw.ellipse(
+                    [
+                        (cap_x - cap_radius, cap_y - cap_radius),
+                        (cap_x + cap_radius, cap_y + cap_radius),
+                    ],
+                    fill=color,
+                )
+
         return img
 
 

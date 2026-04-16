@@ -6,6 +6,7 @@ from .components import (
     TextSize,
     TextAlignment,
     TextRenderer,
+    SparklineRenderer,
     CircularGauge,
     ProgressBar,
 )
@@ -20,6 +21,8 @@ from .layouts import (
     SplitMetricsLayout,
     RadialDashboardLayout,
     ProgressStackLayout,
+    PMBarsLayout,
+    MetricRingLayout,
     get_layout,
 )
 
@@ -29,6 +32,7 @@ __all__ = [
     "TextSize",
     "TextAlignment",
     "TextRenderer",
+    "SparklineRenderer",
     "CircularGauge",
     "ProgressBar",
     "LayoutType",
@@ -41,5 +45,7 @@ __all__ = [
     "SplitMetricsLayout",
     "RadialDashboardLayout",
     "ProgressStackLayout",
+    "PMBarsLayout",
+    "MetricRingLayout",
     "get_layout",
 ]

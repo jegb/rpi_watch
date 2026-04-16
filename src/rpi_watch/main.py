@@ -1,10 +1,4 @@
-"""Main entry point for RPi Watch application.
-
-Orchestrates the event loop that:
-1. Receives MQTT metric updates
-2. Renders metrics to PIL Images
-3. Displays on I2C-connected GC9A01 display
-"""
+"""Main entry point for RPi Watch application."""
 
 import logging
 import signal
@@ -15,7 +9,13 @@ from typing import Optional
 
 import yaml
 
-from .display import GC9A01_SPI, MetricRenderer
+from .display import (
+    GC9A01_SPI,
+    ColorScheme,
+    MetricRenderer,
+    MetricRingLayout,
+    PMBarsLayout,
+)
 from .metrics import MetricStore
 from .mqtt import MQTTSubscriber
 from .utils import setup_logging
@@ -65,7 +65,12 @@ class RPiWatch:
         self.metric_store = MetricStore()
         self.display = None
         self.renderer = None
+        self.pm_bars_layout = None
+        self.metric_ring_layout = None
         self.mqtt_subscriber = None
+        self._rotation_fields: tuple[str, ...] = ()
+        self._rotation_index = 0
+        self._rotation_last_switch: Optional[float] = None
 
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file.
@@ -110,6 +115,7 @@ class RPiWatch:
 
             # Initialize renderer
             metric_config = self.config.get('metric_display', {})
+            color_scheme = self._get_color_scheme(metric_config.get('color_scheme'))
             self.renderer = MetricRenderer(
                 width=display_config.get('width', 240),
                 height=display_config.get('height', 240),
@@ -122,6 +128,20 @@ class RPiWatch:
                 padding=metric_config.get('padding', 18),
                 title_gap=metric_config.get('title_gap', 10),
                 unit_gap=metric_config.get('unit_gap', 6),
+                sparkline_height=metric_config.get('sparkline_height', 32),
+                sparkline_gap=metric_config.get('sparkline_gap', 10),
+            )
+            self.pm_bars_layout = PMBarsLayout(
+                width=display_config.get('width', 240),
+                height=display_config.get('height', 240),
+                color_scheme=color_scheme,
+                font_path=metric_config.get('font_path'),
+            )
+            self.metric_ring_layout = MetricRingLayout(
+                width=display_config.get('width', 240),
+                height=display_config.get('height', 240),
+                color_scheme=color_scheme,
+                font_path=metric_config.get('font_path'),
             )
 
             # Initialize MQTT subscriber
@@ -147,11 +167,116 @@ class RPiWatch:
         """Return metric display configuration."""
         return self.config.get('metric_display', {})
 
+    @staticmethod
+    def _get_color_scheme(color_scheme_name: Optional[str]) -> ColorScheme:
+        """Resolve a configured color scheme name to a ``ColorScheme`` enum."""
+        if not color_scheme_name:
+            return ColorScheme.BRIGHT
+        try:
+            return ColorScheme[str(color_scheme_name).upper()]
+        except KeyError:
+            logger.warning("Unknown color scheme '%s'; falling back to BRIGHT", color_scheme_name)
+            return ColorScheme.BRIGHT
+
+    @staticmethod
+    def _coerce_color(value, fallback: tuple[int, int, int]) -> tuple[int, int, int]:
+        """Normalize a configured RGB color to a tuple."""
+        try:
+            if isinstance(value, (list, tuple)) and len(value) >= 3:
+                return tuple(int(channel) for channel in value[:3])
+        except (TypeError, ValueError):
+            pass
+        return fallback
+
+    def _get_layout_mode(self) -> str:
+        """Return the configured render layout mode."""
+        return str(self._get_metric_display_config().get('layout_mode', 'single_metric')).lower()
+
+    def _get_history_tail(
+        self,
+        field_name: str,
+        *,
+        limit: Optional[int] = None,
+    ) -> list[tuple[float, float]]:
+        """Return recent history for a field."""
+        history_limit = limit or self._get_metric_display_config().get('sparkline_points', 10)
+        return self.metric_store.get_field_history(field_name, limit=history_limit)
+
     def _get_preferred_metric_field(self) -> Optional[str]:
         """Return the preferred payload field to display."""
         metric_config = self._get_metric_display_config()
         mqtt_config = self.config.get('mqtt', {})
         return metric_config.get('metric_key') or mqtt_config.get('json_field')
+
+    def _get_rotation_fields(self, numeric_payload: dict[str, float]) -> list[str]:
+        """Return the configured rotation order filtered to available numeric fields."""
+        metric_config = self._get_metric_display_config()
+        configured_fields = metric_config.get('rotate_fields')
+
+        if configured_fields:
+            ordered_fields = [str(field_name) for field_name in configured_fields]
+        else:
+            preferred_field = self._get_preferred_metric_field()
+            ordered_fields = []
+            if preferred_field:
+                ordered_fields.append(preferred_field)
+            ordered_fields.extend(DEFAULT_FIELD_PRIORITY)
+            ordered_fields.extend(str(field_name) for field_name in numeric_payload.keys())
+
+        seen: set[str] = set()
+        rotation_fields: list[str] = []
+        for field_name in ordered_fields:
+            if field_name in numeric_payload and field_name not in seen:
+                rotation_fields.append(field_name)
+                seen.add(field_name)
+
+        return rotation_fields
+
+    def _select_rotating_field(
+        self,
+        numeric_payload: dict[str, float],
+        *,
+        current_time: Optional[float] = None,
+    ) -> Optional[str]:
+        """Select the current field according to rotation config and timer state."""
+        if not numeric_payload:
+            return None
+
+        metric_config = self._get_metric_display_config()
+        rotate_metrics = bool(metric_config.get('rotate_metrics', False))
+        if not rotate_metrics:
+            return None
+
+        rotation_fields = self._get_rotation_fields(numeric_payload)
+        if not rotation_fields:
+            return None
+
+        now = current_time if current_time is not None else time.time()
+        interval_seconds = max(0.5, float(metric_config.get('rotate_interval_seconds', 5.0)))
+
+        rotation_fields_tuple = tuple(rotation_fields)
+        if rotation_fields_tuple != self._rotation_fields:
+            previous_field = None
+            if self._rotation_fields and self._rotation_index < len(self._rotation_fields):
+                previous_field = self._rotation_fields[self._rotation_index]
+            self._rotation_fields = rotation_fields_tuple
+            if previous_field and previous_field in rotation_fields:
+                self._rotation_index = rotation_fields.index(previous_field)
+            else:
+                self._rotation_index = 0
+            self._rotation_last_switch = now
+            logger.info("Metric rotation fields: %s", ", ".join(rotation_fields))
+        elif len(rotation_fields) > 1 and self._rotation_last_switch is not None:
+            elapsed = now - self._rotation_last_switch
+            if elapsed >= interval_seconds:
+                steps = int(elapsed // interval_seconds)
+                self._rotation_index = (self._rotation_index + max(1, steps)) % len(rotation_fields)
+                self._rotation_last_switch = now
+                logger.info("Rotating metric display to %s", rotation_fields[self._rotation_index])
+        elif self._rotation_last_switch is None:
+            self._rotation_last_switch = now
+
+        return rotation_fields[self._rotation_index]
 
     def _get_display_metadata(self, field_name: Optional[str]) -> dict:
         """Resolve display labels for a metric field."""
@@ -218,17 +343,107 @@ class RPiWatch:
         decimal_places: int,
         title_label: str,
         unit_label: str,
+        sparkline_values: Optional[list[tuple[float, float]]] = None,
     ) -> None:
         """Render and display a metric or placeholder."""
+        metric_config = self._get_metric_display_config()
         image = self.renderer.render_and_mask(
             value,
             decimal_places=decimal_places,
             title_label=title_label,
             unit_label=unit_label,
+            sparkline_values=sparkline_values if metric_config.get('show_sparkline', True) else None,
+            sparkline_color=self._coerce_color(
+                metric_config.get('sparkline_line_color'),
+                tuple(metric_config.get('text_color', [255, 255, 255])),
+            ),
         )
         self.display.display(image)
 
-    def _select_display_metric(self, payload: Optional[dict]) -> Optional[dict]:
+    def _display_pm_bars(self, payload: dict) -> None:
+        """Render the dedicated PM bars layout."""
+        metric_config = self._get_metric_display_config()
+        image = self.pm_bars_layout.render(
+            payload,
+            title=str(metric_config.get('pm_bars_title', 'PARTICLES')),
+            unit_label=str(metric_config.get('pm_bars_unit_label', 'µg/m³')),
+            metric_fields=metric_config.get(
+                'pm_bar_fields',
+                ['pm_1_0', 'pm_2_5', 'pm_4_0', 'pm_10_0'],
+            ),
+            metric_colors={
+                key: self._coerce_color(value, self.pm_bars_layout.DEFAULT_COLORS.get(key, (255, 255, 255)))
+                for key, value in (metric_config.get('pm_bars_colors', {}) or {}).items()
+            },
+            max_value=metric_config.get('pm_bars_max_value'),
+            auto_scale_floor=float(metric_config.get('pm_bars_auto_scale_floor', 25.0)),
+        )
+        self.display.display(self.renderer.apply_circular_mask(image))
+
+    def _select_ring_metric(
+        self,
+        payload: Optional[dict],
+        scalar_value: Optional[float],
+        *,
+        current_time: Optional[float] = None,
+    ) -> Optional[dict]:
+        """Choose which metric should drive the ring layout."""
+        metric_config = self._get_metric_display_config()
+        preferred_field = metric_config.get('ring_field') or self._get_preferred_metric_field()
+        numeric_payload = self.metric_store.extract_numeric_payload(payload)
+
+        if preferred_field and preferred_field in numeric_payload:
+            field_name = preferred_field
+            value = numeric_payload[field_name]
+        elif numeric_payload:
+            selected = self._select_display_metric(payload, current_time=current_time)
+            if selected is None:
+                return None
+            field_name = selected['field']
+            value = selected['value']
+        elif scalar_value is not None:
+            field_name = preferred_field or self._get_preferred_metric_field() or 'value'
+            value = scalar_value
+        else:
+            return None
+
+        display_metadata = self._get_display_metadata(field_name)
+        return {
+            'field': field_name,
+            'value': value,
+            'decimal_places': display_metadata['decimal_places'],
+            'title_label': display_metadata['title_label'],
+            'unit_label': display_metadata['unit_label'],
+        }
+
+    def _display_metric_ring(self, metric: dict) -> None:
+        """Render a threshold-colored ring layout."""
+        metric_config = self._get_metric_display_config()
+        image = self.metric_ring_layout.render(
+            metric['value'],
+            title=metric['title_label'],
+            unit=metric['unit_label'],
+            decimal_places=metric['decimal_places'],
+            min_value=float(metric_config.get('ring_min_value', 0.0)),
+            max_value=float(metric_config.get('ring_max_value', 40.0)),
+            start_angle=float(metric_config.get('ring_start_angle', 135.0)),
+            end_angle=float(metric_config.get('ring_end_angle', 405.0)),
+            thickness=int(metric_config.get('ring_thickness', 16)),
+            rounded_caps=bool(metric_config.get('ring_rounded_caps', True)),
+            thresholds=metric_config.get('ring_thresholds'),
+            track_color=self._coerce_color(
+                metric_config.get('ring_track_color'),
+                self.metric_ring_layout.color_scheme["secondary"],
+            ),
+        )
+        self.display.display(self.renderer.apply_circular_mask(image))
+
+    def _select_display_metric(
+        self,
+        payload: Optional[dict],
+        *,
+        current_time: Optional[float] = None,
+    ) -> Optional[dict]:
         """Choose which field from the latest payload should be displayed."""
         if not payload:
             return None
@@ -239,14 +454,18 @@ class RPiWatch:
 
         preferred_field = self._get_preferred_metric_field()
 
-        field_name = None
-        if preferred_field and preferred_field in numeric_payload:
-            field_name = preferred_field
-        else:
-            for candidate in DEFAULT_FIELD_PRIORITY:
-                if candidate in numeric_payload:
-                    field_name = candidate
-                    break
+        field_name = self._select_rotating_field(
+            numeric_payload,
+            current_time=current_time,
+        )
+        if field_name is None:
+            if preferred_field and preferred_field in numeric_payload:
+                field_name = preferred_field
+            else:
+                for candidate in DEFAULT_FIELD_PRIORITY:
+                    if candidate in numeric_payload:
+                        field_name = candidate
+                        break
 
         if field_name is None:
             field_name = next(iter(numeric_payload))
@@ -302,11 +521,80 @@ class RPiWatch:
 
             while self.running:
                 try:
+                    loop_time = time.time()
                     current_payload = self.metric_store.get_payload()
                     current_value = self.metric_store.get_latest()
-                    selected_metric = self._select_display_metric(current_payload)
+                    layout_mode = self._get_layout_mode()
+                    selected_metric = None
 
-                    if selected_metric is not None:
+                    if layout_mode == 'pm_bars' and current_payload:
+                        pm_snapshot = tuple(
+                            self.metric_store.get_field(field_name) or 0.0
+                            for field_name in ('pm_1_0', 'pm_2_5', 'pm_4_0', 'pm_10_0')
+                        )
+                        render_state = ('pm_bars', pm_snapshot)
+
+                        if render_state != last_render_state:
+                            self._display_pm_bars(current_payload)
+                            last_render_state = render_state
+                            frame_count += 1
+                            logger.debug("Display updated (frame %s): pm_bars=%s", frame_count, pm_snapshot)
+                    elif layout_mode == 'metric_ring':
+                        ring_metric = self._select_ring_metric(
+                            current_payload,
+                            current_value,
+                            current_time=loop_time,
+                        )
+
+                        if ring_metric is not None:
+                            render_state = (
+                                'metric_ring',
+                                ring_metric['field'],
+                                ring_metric['value'],
+                                ring_metric['decimal_places'],
+                                ring_metric['title_label'],
+                                ring_metric['unit_label'],
+                            )
+
+                            if render_state != last_render_state:
+                                self._display_metric_ring(ring_metric)
+                                last_render_state = render_state
+                                frame_count += 1
+                                logger.debug(
+                                    "Display updated (frame %s): ring %s=%s",
+                                    frame_count,
+                                    ring_metric['field'],
+                                    ring_metric['value'],
+                                )
+                        elif placeholder_metric is not None:
+                            render_state = (
+                                'placeholder',
+                                placeholder_metric['text'],
+                                placeholder_metric['title_label'],
+                                placeholder_metric['unit_label'],
+                            )
+
+                            if render_state != last_render_state:
+                                logger.info(
+                                    "Displaying placeholder metric until first MQTT update: %s",
+                                    placeholder_metric['text'],
+                                )
+                                self._display_metric_value(
+                                    placeholder_metric['text'],
+                                    decimal_places=metric_config.get('decimal_places', 1),
+                                    title_label=placeholder_metric['title_label'],
+                                    unit_label=placeholder_metric['unit_label'],
+                                )
+                                last_render_state = render_state
+                    else:
+                        selected_metric = self._select_display_metric(
+                            current_payload,
+                            current_time=loop_time,
+                        )
+
+                    if layout_mode == 'single_metric' and selected_metric is not None:
+                        sparkline_series = self._get_history_tail(selected_metric['field'])
+                        sparkline_state = tuple(round(value, 3) for _, value in sparkline_series)
                         render_state = (
                             'metric',
                             selected_metric['field'],
@@ -314,6 +602,7 @@ class RPiWatch:
                             selected_metric['decimal_places'],
                             selected_metric['title_label'],
                             selected_metric['unit_label'],
+                            sparkline_state,
                         )
 
                         # Only update display if value changed (reduces SPI traffic)
@@ -323,6 +612,7 @@ class RPiWatch:
                                 decimal_places=selected_metric['decimal_places'],
                                 title_label=selected_metric['title_label'],
                                 unit_label=selected_metric['unit_label'],
+                                sparkline_values=sparkline_series,
                             )
                             last_render_state = render_state
                             frame_count += 1
@@ -332,12 +622,16 @@ class RPiWatch:
                             )
                     elif current_value is not None:
                         display_metadata = self._get_display_metadata(self._get_preferred_metric_field())
+                        sparkline_field = display_metadata['field'] or self._get_preferred_metric_field() or 'value'
+                        sparkline_series = self._get_history_tail(sparkline_field)
+                        sparkline_state = tuple(round(value, 3) for _, value in sparkline_series)
                         render_state = (
                             'scalar',
                             current_value,
                             display_metadata['decimal_places'],
                             display_metadata['title_label'],
                             display_metadata['unit_label'],
+                            sparkline_state,
                         )
 
                         if render_state != last_render_state:
@@ -346,6 +640,7 @@ class RPiWatch:
                                 decimal_places=display_metadata['decimal_places'],
                                 title_label=display_metadata['title_label'],
                                 unit_label=display_metadata['unit_label'],
+                                sparkline_values=sparkline_series,
                             )
                             last_render_state = render_state
                             frame_count += 1

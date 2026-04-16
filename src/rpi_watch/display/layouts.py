@@ -9,7 +9,7 @@ from enum import Enum
 
 from PIL import Image, ImageDraw
 
-from .components import TextRenderer, CircularGauge, ProgressBar, TextSize
+from .components import TextRenderer, CircularGauge, ProgressBar, SparklineRenderer, TextSize
 from .renderer import MetricRenderer
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,8 @@ class LayoutType(Enum):
     GAUGE_WITH_STATS = "gauge_with_stats"   # Gauge + statistics
     RADIAL_DASHBOARD = "radial_dashboard"   # 3 metrics in triangular layout
     PROGRESS_STACK = "progress_stack"       # Stacked progress bars
+    PM_BARS = "pm_bars"                     # PM1/PM2.5/PM4/PM10 stacked bars
+    METRIC_RING = "metric_ring"             # Single metric over threshold-colored ring
 
 
 class ColorScheme(Enum):
@@ -101,6 +103,7 @@ class DisplayLayout:
         self.text_renderer = TextRenderer(width=width, height=height, font_path=font_path)
         self.gauge = CircularGauge(width=width, height=height, font_path=font_path)
         self.progress = ProgressBar(width=width, height=height, font_path=font_path)
+        self.sparkline = SparklineRenderer(width=width, height=48)
 
     def render(self, **kwargs) -> Image.Image:
         """Render layout with given data.
@@ -580,6 +583,274 @@ class ProgressStackLayout(DisplayLayout):
         return img
 
 
+class PMBarsLayout(DisplayLayout):
+    """Layout: four particulate matter bars with a shared unit label."""
+
+    DEFAULT_FIELDS = (
+        ("pm_1_0", "PM1"),
+        ("pm_2_5", "PM2.5"),
+        ("pm_4_0", "PM4"),
+        ("pm_10_0", "PM10"),
+    )
+
+    DEFAULT_COLORS = {
+        "pm_1_0": (92, 172, 255),
+        "pm_2_5": (0, 214, 143),
+        "pm_4_0": (255, 195, 0),
+        "pm_10_0": (255, 107, 53),
+    }
+
+    def render(
+        self,
+        payload: Dict[str, Any],
+        *,
+        title: str = "PARTICLES",
+        unit_label: str = "µg/m³",
+        metric_fields: Optional[list] = None,
+        metric_colors: Optional[dict[str, Tuple[int, int, int]]] = None,
+        max_value: Optional[float] = None,
+        auto_scale_floor: float = 25.0,
+    ) -> Image.Image:
+        """Render four PM bars from the current payload."""
+        img = Image.new('RGB', (self.width, self.height), self.bg_color)
+        draw = ImageDraw.Draw(img)
+
+        field_specs = metric_fields or list(self.DEFAULT_FIELDS)
+        normalized_fields: list[tuple[str, str]] = []
+        for item in field_specs:
+            if isinstance(item, (tuple, list)) and len(item) >= 2:
+                normalized_fields.append((str(item[0]), str(item[1])))
+            else:
+                field_name = str(item)
+                normalized_fields.append((field_name, field_name.upper()))
+
+        values = []
+        for field_name, _ in normalized_fields:
+            try:
+                values.append(float(payload.get(field_name, 0.0)))
+            except (TypeError, ValueError):
+                values.append(0.0)
+
+        scale_max = max_value or max(auto_scale_floor, max(values or [auto_scale_floor]))
+        colors = {**self.DEFAULT_COLORS, **(metric_colors or {})}
+
+        header_top = 14
+        header_height = 22
+        footer_height = 16
+        content_top = header_top + header_height + 14
+        content_bottom = self.height - footer_height - 18
+        row_gap = 10
+        row_count = max(1, len(normalized_fields))
+        row_height = max(20, int((content_bottom - content_top - (row_gap * (row_count - 1))) / row_count))
+        label_width = 52
+        value_width = 46
+        bar_left = 16 + label_width + 8
+        bar_right = self.width - 16 - value_width
+        bar_width = max(24, bar_right - bar_left)
+        bar_height = max(10, row_height - 8)
+        bar_radius = max(4, bar_height // 2)
+
+        title_font, title_bbox = self.text_renderer.fit_font(
+            title,
+            22,
+            max_width=self.width - 32,
+            min_size=16,
+            max_height=header_height,
+        )
+        title_width = title_bbox[2] - title_bbox[0]
+        draw.text(
+            ((self.width - title_width) // 2, header_top - title_bbox[1]),
+            title,
+            fill=self.color_scheme["secondary"],
+            font=title_font,
+        )
+
+        for index, ((field_name, label), value) in enumerate(zip(normalized_fields, values)):
+            row_y = content_top + (index * (row_height + row_gap))
+            bar_y = row_y + ((row_height - bar_height) // 2)
+            row_color = colors.get(field_name, self.color_scheme["accent"])
+
+            label_font, label_bbox = self.text_renderer.fit_font(
+                label,
+                20,
+                max_width=label_width,
+                min_size=12,
+                max_height=row_height,
+            )
+            label_width_actual = label_bbox[2] - label_bbox[0]
+            label_x = 16 + max(0, (label_width - label_width_actual) // 2)
+            draw.text(
+                (label_x, row_y - label_bbox[1]),
+                label,
+                fill=self.color_scheme["secondary"],
+                font=label_font,
+            )
+
+            value_text = f"{value:.1f}"
+            value_font, value_bbox = self.text_renderer.fit_font(
+                value_text,
+                20,
+                max_width=value_width,
+                min_size=12,
+                max_height=row_height,
+            )
+            value_width_actual = value_bbox[2] - value_bbox[0]
+            value_x = self.width - 16 - value_width_actual
+            draw.text(
+                (value_x, row_y - value_bbox[1]),
+                value_text,
+                fill=self.color_scheme["primary"],
+                font=value_font,
+            )
+
+            draw.rounded_rectangle(
+                [(bar_left, bar_y), (bar_left + bar_width, bar_y + bar_height)],
+                radius=bar_radius,
+                outline=self.color_scheme["secondary"],
+                fill=(28, 28, 28),
+            )
+            fill_width = int(bar_width * max(0.0, min(1.0, value / scale_max)))
+            if fill_width > 0:
+                draw.rounded_rectangle(
+                    [(bar_left, bar_y), (bar_left + fill_width, bar_y + bar_height)],
+                    radius=bar_radius,
+                    fill=row_color,
+                )
+
+        unit_font, unit_bbox = self.text_renderer.fit_font(
+            unit_label,
+            18,
+            max_width=self.width - 32,
+            min_size=12,
+            max_height=footer_height,
+        )
+        unit_width = unit_bbox[2] - unit_bbox[0]
+        draw.text(
+            ((self.width - unit_width) // 2, self.height - footer_height - 8 - unit_bbox[1]),
+            unit_label,
+            fill=self.color_scheme["secondary"],
+            font=unit_font,
+        )
+
+        return img
+
+
+class MetricRingLayout(DisplayLayout):
+    """Layout: centered metric value inside a threshold-colored ring."""
+
+    def render(
+        self,
+        value: float,
+        *,
+        title: str = "TEMP",
+        unit: str = "°C",
+        decimal_places: int = 1,
+        min_value: float = 0.0,
+        max_value: float = 40.0,
+        start_angle: float = 135.0,
+        end_angle: float = 405.0,
+        thickness: int = 16,
+        rounded_caps: bool = True,
+        thresholds: Optional[list] = None,
+        track_color: Optional[Tuple[int, int, int]] = None,
+    ) -> Image.Image:
+        """Render a single metric over a configurable ring."""
+        track = track_color or self.color_scheme["secondary"]
+        img = self.gauge.render_gradient_ring(
+            value,
+            min_value=min_value,
+            max_value=max_value,
+            thresholds=thresholds,
+            start_angle=start_angle,
+            end_angle=end_angle,
+            thickness=thickness,
+            background_color=self.bg_color,
+            track_color=track,
+            rounded_caps=rounded_caps,
+        )
+        draw = ImageDraw.Draw(img)
+
+        value_text = f"{value:.{decimal_places}f}"
+        value_color = CircularGauge.color_from_thresholds(
+            value,
+            thresholds,
+            min_value=min_value,
+            max_value=max_value,
+        )
+
+        inner_margin = max(42, thickness + 28)
+        available_width = self.width - (inner_margin * 2)
+        available_height = self.height - (inner_margin * 2)
+
+        title_font, title_bbox = self.text_renderer.fit_font(
+            title,
+            24,
+            max_width=available_width,
+            min_size=14,
+            max_height=max(16, int(available_height * 0.18)),
+        )
+        unit_font, unit_bbox = self.text_renderer.fit_font(
+            unit,
+            22,
+            max_width=available_width,
+            min_size=14,
+            max_height=max(16, int(available_height * 0.18)),
+        )
+
+        chosen_value_font = None
+        chosen_value_bbox = None
+        for size in range(96, 25, -2):
+            value_font, value_bbox = self.text_renderer.fit_font(
+                value_text,
+                size,
+                max_width=available_width,
+                min_size=24,
+            )
+            total_height = (
+                (title_bbox[3] - title_bbox[1])
+                + 10
+                + (value_bbox[3] - value_bbox[1])
+                + 8
+                + (unit_bbox[3] - unit_bbox[1])
+            )
+            if total_height <= available_height:
+                chosen_value_font = value_font
+                chosen_value_bbox = value_bbox
+                break
+
+        if chosen_value_font is None or chosen_value_bbox is None:
+            chosen_value_font, chosen_value_bbox = self.text_renderer.fit_font(
+                value_text,
+                48,
+                max_width=available_width,
+                min_size=24,
+                max_height=available_height,
+            )
+
+        title_height = title_bbox[3] - title_bbox[1]
+        value_height = chosen_value_bbox[3] - chosen_value_bbox[1]
+        unit_height = unit_bbox[3] - unit_bbox[1]
+        total_height = title_height + 10 + value_height + 8 + unit_height
+        current_y = inner_margin + max(0, (available_height - total_height) // 2)
+
+        for text, font, bbox, color, gap in (
+            (title, title_font, title_bbox, self.color_scheme["secondary"], 10),
+            (value_text, chosen_value_font, chosen_value_bbox, value_color, 8),
+            (unit, unit_font, unit_bbox, self.color_scheme["secondary"], 0),
+        ):
+            text_width = bbox[2] - bbox[0]
+            text_x = (self.width - text_width) // 2
+            draw.text(
+                (text_x, current_y - bbox[1]),
+                text,
+                fill=color,
+                font=font,
+            )
+            current_y += (bbox[3] - bbox[1]) + gap
+
+        return img
+
+
 def get_layout(layout_type: LayoutType, **config) -> DisplayLayout:
     """Factory function to get layout by type.
 
@@ -598,6 +869,8 @@ def get_layout(layout_type: LayoutType, **config) -> DisplayLayout:
         LayoutType.SPLIT_METRICS: SplitMetricsLayout,
         LayoutType.RADIAL_DASHBOARD: RadialDashboardLayout,
         LayoutType.PROGRESS_STACK: ProgressStackLayout,
+        LayoutType.PM_BARS: PMBarsLayout,
+        LayoutType.METRIC_RING: MetricRingLayout,
     }
 
     layout_class = layouts.get(layout_type)

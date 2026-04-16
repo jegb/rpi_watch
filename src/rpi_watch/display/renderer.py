@@ -5,10 +5,11 @@ circular masking for the round 240x240 display.
 """
 
 import logging
-from typing import Optional, Tuple
+from typing import Any, Optional, Sequence, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .components import SparklineRenderer
 from .fonts import load_font
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,8 @@ class MetricRenderer:
         padding: int = 18,
         title_gap: int = 10,
         unit_gap: int = 6,
+        sparkline_height: int = 32,
+        sparkline_gap: int = 10,
     ):
         """Initialize the renderer.
 
@@ -52,6 +55,8 @@ class MetricRenderer:
         self.padding = padding
         self.title_gap = title_gap
         self.unit_gap = unit_gap
+        self.sparkline_height = sparkline_height
+        self.sparkline_gap = sparkline_gap
         self._font_cache = {}
         self.resolved_font_source = None
         self.using_scalable_font = False
@@ -69,9 +74,20 @@ class MetricRenderer:
             f"font_size={font_size}, title_font_size={self.title_font_size}, "
             f"unit_font_size={self.unit_font_size}, "
             f"title_gap={self.title_gap}, unit_gap={self.unit_gap}, "
+            f"sparkline_height={self.sparkline_height}, sparkline_gap={self.sparkline_gap}, "
             f"font_path={font_path}, resolved_font={self.resolved_font_source}, "
             f"scalable_font={self.using_scalable_font}"
         )
+
+    @staticmethod
+    def _measure_text(
+        draw: ImageDraw.ImageDraw,
+        text: str,
+        font: ImageFont.FreeTypeFont,
+    ) -> tuple[tuple[int, int, int, int], int, int]:
+        """Return the bbox, width, and height for a text run."""
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox, bbox[2] - bbox[0], bbox[3] - bbox[1]
 
     def _load_font(self, font_path: Optional[str], font_size: int) -> ImageFont.FreeTypeFont:
         """Load a TrueType font.
@@ -100,18 +116,21 @@ class MetricRenderer:
         base_size: int,
         max_width: int,
         min_size: int,
-    ) -> ImageFont.FreeTypeFont:
+        max_height: Optional[int] = None,
+    ) -> tuple[ImageFont.FreeTypeFont, tuple[int, int, int, int]]:
         """Reduce font size until text fits the requested width."""
         scratch = Image.new('RGB', (self.width, self.height), self.background_color)
         draw = ImageDraw.Draw(scratch)
 
         for size in range(base_size, min_size - 1, -2):
             font = self._load_font(self.font_path, size)
-            bbox = draw.textbbox((0, 0), text, font=font)
-            if (bbox[2] - bbox[0]) <= max_width:
-                return font
+            bbox, text_width, text_height = self._measure_text(draw, text, font)
+            if text_width <= max_width and (max_height is None or text_height <= max_height):
+                return font, bbox
 
-        return self._load_font(self.font_path, min_size)
+        font = self._load_font(self.font_path, min_size)
+        bbox, _, _ = self._measure_text(draw, text, font)
+        return font, bbox
 
     def _create_circular_mask(self) -> Image.Image:
         """Create a circular mask for the round display.
@@ -144,75 +163,118 @@ class MetricRenderer:
         display_text: str,
         title_label: str = "",
         unit_label: str = "",
+        sparkline_values: Optional[Sequence[Any]] = None,
+        sparkline_color: Optional[Tuple[int, int, int]] = None,
     ) -> Image.Image:
         """Render arbitrary display text with optional title and unit lines."""
         image = Image.new('RGB', (self.width, self.height), self.background_color)
         draw = ImageDraw.Draw(image)
 
         max_text_width = self.width - (self.padding * 2)
-        value_font = self._fit_font(
-            display_text,
-            self.font_size,
-            max_width=max_text_width,
-            min_size=max(42, int(self.font_size * 0.60)),
-        )
-        value_bbox = draw.textbbox((0, 0), display_text, font=value_font)
-        value_width = value_bbox[2] - value_bbox[0]
-        value_height = value_bbox[3] - value_bbox[1]
+        sparkline_values = list(sparkline_values or [])
+        has_sparkline = len(sparkline_values) >= 2
+        available_text_height = self.height - (self.padding * 2)
+        if has_sparkline:
+            available_text_height -= self.sparkline_height + self.sparkline_gap
 
-        lines = []
+        lines: list[dict[str, Any]]
+        title_line: Optional[dict[str, Any]] = None
+        unit_line: Optional[dict[str, Any]] = None
 
         if title_label:
-            title_font = self._fit_font(
+            title_font, title_bbox = self._fit_font(
                 title_label,
                 self.title_font_size,
                 max_width=max_text_width,
                 min_size=max(18, int(self.title_font_size * 0.75)),
+                max_height=max(18, int(available_text_height * 0.18)),
             )
-            title_bbox = draw.textbbox((0, 0), title_label, font=title_font)
-            lines.append(
-                {
-                    "text": title_label,
-                    "font": title_font,
-                    "width": title_bbox[2] - title_bbox[0],
-                    "height": title_bbox[3] - title_bbox[1],
-                    "top": title_bbox[1],
-                    "gap_after": self.title_gap,
-                }
-            )
-
-        lines.append(
-            {
-                "text": display_text,
-                "font": value_font,
-                "width": value_width,
-                "height": value_height,
-                "top": value_bbox[1],
-                "gap_after": self.unit_gap if unit_label else 0,
+            title_line = {
+                "text": title_label,
+                "font": title_font,
+                "width": title_bbox[2] - title_bbox[0],
+                "height": title_bbox[3] - title_bbox[1],
+                "top": title_bbox[1],
+                "gap_after": self.title_gap,
             }
-        )
 
         if unit_label:
-            unit_font = self._fit_font(
+            unit_font, unit_bbox = self._fit_font(
                 unit_label,
                 self.unit_font_size,
                 max_width=max_text_width,
                 min_size=max(18, int(self.unit_font_size * 0.75)),
+                max_height=max(18, int(available_text_height * 0.18)),
             )
-            unit_bbox = draw.textbbox((0, 0), unit_label, font=unit_font)
-            lines.append(
+            unit_line = {
+                "text": unit_label,
+                "font": unit_font,
+                "width": unit_bbox[2] - unit_bbox[0],
+                "height": unit_bbox[3] - unit_bbox[1],
+                "top": unit_bbox[1],
+                "gap_after": 0,
+            }
+
+        value_min_size = max(30, int(self.font_size * 0.50))
+        chosen_value_font: ImageFont.FreeTypeFont | None = None
+        chosen_value_bbox: tuple[int, int, int, int] | None = None
+        lines = []
+
+        for value_size in range(self.font_size, value_min_size - 1, -2):
+            value_font = self._load_font(self.font_path, value_size)
+            value_bbox, value_width, value_height = self._measure_text(draw, display_text, value_font)
+
+            candidate_lines = []
+            if title_line:
+                candidate_lines.append(dict(title_line))
+            candidate_lines.append(
                 {
-                    "text": unit_label,
-                    "font": unit_font,
-                    "width": unit_bbox[2] - unit_bbox[0],
-                    "height": unit_bbox[3] - unit_bbox[1],
-                    "top": unit_bbox[1],
-                    "gap_after": 0,
+                    "text": display_text,
+                    "font": value_font,
+                    "width": value_width,
+                    "height": value_height,
+                    "top": value_bbox[1],
+                    "gap_after": self.unit_gap if unit_line else 0,
                 }
             )
+            if unit_line:
+                candidate_lines.append(dict(unit_line))
+
+            total_height = sum(line["height"] + line["gap_after"] for line in candidate_lines)
+            if value_width <= max_text_width and total_height <= available_text_height:
+                chosen_value_font = value_font
+                chosen_value_bbox = value_bbox
+                lines = candidate_lines
+                break
+
+        if chosen_value_font is None or chosen_value_bbox is None:
+            chosen_value_font, chosen_value_bbox = self._fit_font(
+                display_text,
+                value_min_size,
+                max_width=max_text_width,
+                min_size=max(24, int(value_min_size * 0.75)),
+                max_height=max(24, available_text_height),
+            )
+            value_width = chosen_value_bbox[2] - chosen_value_bbox[0]
+            value_height = chosen_value_bbox[3] - chosen_value_bbox[1]
+            lines = []
+            if title_line:
+                lines.append(dict(title_line))
+            lines.append(
+                {
+                    "text": display_text,
+                    "font": chosen_value_font,
+                    "width": value_width,
+                    "height": value_height,
+                    "top": chosen_value_bbox[1],
+                    "gap_after": self.unit_gap if unit_line else 0,
+                }
+            )
+            if unit_line:
+                lines.append(dict(unit_line))
 
         total_height = sum(line["height"] + line["gap_after"] for line in lines)
-        current_y = (self.height - total_height) // 2
+        current_y = self.padding + max(0, (available_text_height - total_height) // 2)
 
         for line in lines:
             text_x = (self.width - line["width"]) // 2
@@ -225,6 +287,26 @@ class MetricRenderer:
             )
             current_y += line["height"] + line["gap_after"]
 
+        if has_sparkline:
+            sparkline_renderer = SparklineRenderer(
+                width=self.width - (self.padding * 2),
+                height=self.sparkline_height,
+                padding=2,
+            )
+            fill_color = tuple(max(0, min(255, int(channel * 0.22))) for channel in (sparkline_color or self.text_color))
+            sparkline_image = sparkline_renderer.render(
+                sparkline_values,
+                background_color=self.background_color,
+                line_color=sparkline_color or self.text_color,
+                fill_color=fill_color,
+                stroke_width=2,
+                point_radius=2,
+            )
+            image.paste(
+                sparkline_image,
+                (self.padding, self.height - self.padding - self.sparkline_height),
+            )
+
         return image
 
     def render_metric(
@@ -233,6 +315,8 @@ class MetricRenderer:
         decimal_places: int = 1,
         title_label: str = "",
         unit_label: str = "",
+        sparkline_values: Optional[Sequence[Any]] = None,
+        sparkline_color: Optional[Tuple[int, int, int]] = None,
     ) -> Image.Image:
         """Render a metric as a PIL Image.
 
@@ -257,6 +341,8 @@ class MetricRenderer:
             formatted_value,
             title_label=title_label,
             unit_label=unit_label,
+            sparkline_values=sparkline_values,
+            sparkline_color=sparkline_color,
         )
 
         logger.debug(
@@ -299,6 +385,8 @@ class MetricRenderer:
         decimal_places: int = 1,
         title_label: str = "",
         unit_label: str = "",
+        sparkline_values: Optional[Sequence[Any]] = None,
+        sparkline_color: Optional[Tuple[int, int, int]] = None,
     ) -> Image.Image:
         """Render metric and apply circular mask in one step.
 
@@ -316,6 +404,8 @@ class MetricRenderer:
             decimal_places=decimal_places,
             title_label=title_label,
             unit_label=unit_label,
+            sparkline_values=sparkline_values,
+            sparkline_color=sparkline_color,
         )
         masked_image = self.apply_circular_mask(image)
         return masked_image
