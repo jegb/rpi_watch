@@ -37,11 +37,14 @@ class GC9A01_SPI:
 
     # GC9A01 Standard Commands (from datasheet)
     CMD_RESET = 0x01                # Software reset
+    CMD_SLEEP_IN = 0x10             # Enter sleep mode
     CMD_SLEEP_OUT = 0x11            # Exit sleep mode
     CMD_PARTIAL_ON = 0x12           # Partial display mode ON
     CMD_NORMAL_ON = 0x13            # Normal display mode ON
     CMD_DISPLAY_INVERT_OFF = 0x20   # Display invert OFF
     CMD_DISPLAY_INVERT_ON = 0x21    # Display invert ON
+    CMD_ALL_PIXELS_OFF = 0x22       # All pixels OFF
+    CMD_ALL_PIXELS_ON = 0x23        # All pixels ON
     CMD_DISPLAY_OFF = 0x28          # Display OFF
     CMD_DISPLAY_ON = 0x29           # Display ON
     CMD_COLUMN_ADDR = 0x2A          # Set column address window
@@ -69,6 +72,8 @@ class GC9A01_SPI:
     RESET_PULSE_HIGH_S = 0.010
     RESET_PULSE_LOW_S = 0.100
     RESET_STABILIZE_S = 0.200
+    SLEEP_OUT_DELAY_S = 0.120
+    DISPLAY_ON_DELAY_S = 0.020
 
     ADAFRUIT_INIT_SEQUENCE = bytes(
         b"\xFE\x00"                      # Inter Register Enable1
@@ -299,9 +304,19 @@ class GC9A01_SPI:
         if data:
             self._write_data(data)
 
+    def send_command(self, command: int, data: bytes = b"", delay_s: float = 0.0):
+        """Send a controller command with optional payload and post-command delay."""
+        if data:
+            self._write_command_data(command, data)
+        else:
+            self._write_command(command)
+
+        if delay_s > 0:
+            time.sleep(delay_s)
+
     def _apply_memory_access_control(self):
         """Apply the currently configured MADCTL value."""
-        self._write_command_data(self.CMD_MEMORY_ACCESS, bytes([self.madctl]))
+        self.send_command(self.CMD_MEMORY_ACCESS, bytes([self.madctl]))
 
     def _override_init_data(self, command: int, data: bytes) -> bytes:
         """Apply local panel overrides to a packed init-sequence command."""
@@ -371,6 +386,49 @@ class GC9A01_SPI:
             self._apply_memory_access_control()
 
         logger.info(f"MADCTL set to 0x{self.madctl:02X}")
+
+    def software_reset(self, delay_s: Optional[float] = None):
+        """Issue a software reset command."""
+        if delay_s is None:
+            delay_s = self.RESET_STABILIZE_S
+        self.send_command(self.CMD_RESET, delay_s=delay_s)
+        self.initialized = False
+
+    def sleep_in(self):
+        """Enter sleep mode."""
+        self.send_command(self.CMD_SLEEP_IN)
+
+    def sleep_out(self, delay_s: Optional[float] = None):
+        """Exit sleep mode."""
+        if delay_s is None:
+            delay_s = self.SLEEP_OUT_DELAY_S
+        self.send_command(self.CMD_SLEEP_OUT, delay_s=delay_s)
+
+    def display_off(self):
+        """Turn the display output off without resetting controller state."""
+        self.send_command(self.CMD_DISPLAY_OFF)
+
+    def display_on(self, delay_s: Optional[float] = None):
+        """Turn the display output on."""
+        if delay_s is None:
+            delay_s = self.DISPLAY_ON_DELAY_S
+        self.send_command(self.CMD_DISPLAY_ON, delay_s=delay_s)
+
+    def set_inversion(self, enabled: bool):
+        """Enable or disable display inversion."""
+        self.send_command(
+            self.CMD_DISPLAY_INVERT_ON if enabled else self.CMD_DISPLAY_INVERT_OFF
+        )
+
+    def set_all_pixels(self, enabled: bool):
+        """Force all pixels on or return them to RAM-controlled output."""
+        self.send_command(
+            self.CMD_ALL_PIXELS_ON if enabled else self.CMD_ALL_PIXELS_OFF
+        )
+
+    def normal_mode_on(self):
+        """Return from partial/all-pixels mode to normal display operation."""
+        self.send_command(self.CMD_NORMAL_ON)
 
     def init_display(self):
         """Initialize the display using Adafruit's packed GC9A01A sequence."""

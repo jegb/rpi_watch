@@ -131,6 +131,53 @@ class TestGC9A01SPI(unittest.TestCase):
         self.assertEqual(driver.madctl, 0x08)
         mock_write.assert_called_once_with(driver.CMD_MEMORY_ACCESS, bytes([0x08]))
 
+    def test_send_command_supports_optional_payload_and_delay(self):
+        """Generic command sending should support data payloads and delays."""
+        driver = GC9A01_SPI()
+
+        with mock.patch.object(driver, "_write_command") as mock_command, mock.patch.object(
+            driver, "_write_command_data"
+        ) as mock_command_data, mock.patch.object(gc9a01_module.time, "sleep") as mock_sleep:
+            driver.send_command(0x23)
+            driver.send_command(0x51, b"\x80", delay_s=0.01)
+
+        mock_command.assert_called_once_with(0x23)
+        mock_command_data.assert_called_once_with(0x51, b"\x80")
+        mock_sleep.assert_called_once_with(0.01)
+
+    def test_display_control_helpers_emit_expected_commands(self):
+        """High-level display controls should map to the controller command set."""
+        driver = GC9A01_SPI()
+
+        with mock.patch.object(driver, "send_command") as mock_send:
+            driver.software_reset()
+            driver.sleep_in()
+            driver.sleep_out()
+            driver.display_off()
+            driver.display_on()
+            driver.set_inversion(True)
+            driver.set_inversion(False)
+            driver.set_all_pixels(True)
+            driver.set_all_pixels(False)
+            driver.normal_mode_on()
+
+        self.assertEqual(
+            mock_send.call_args_list,
+            [
+                mock.call(driver.CMD_RESET, delay_s=driver.RESET_STABILIZE_S),
+                mock.call(driver.CMD_SLEEP_IN),
+                mock.call(driver.CMD_SLEEP_OUT, delay_s=driver.SLEEP_OUT_DELAY_S),
+                mock.call(driver.CMD_DISPLAY_OFF),
+                mock.call(driver.CMD_DISPLAY_ON, delay_s=driver.DISPLAY_ON_DELAY_S),
+                mock.call(driver.CMD_DISPLAY_INVERT_ON),
+                mock.call(driver.CMD_DISPLAY_INVERT_OFF),
+                mock.call(driver.CMD_ALL_PIXELS_ON),
+                mock.call(driver.CMD_ALL_PIXELS_OFF),
+                mock.call(driver.CMD_NORMAL_ON),
+            ],
+        )
+        self.assertFalse(driver.initialized)
+
 
 if __name__ == "__main__":
     unittest.main()

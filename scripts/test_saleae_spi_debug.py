@@ -65,6 +65,23 @@ except ImportError:
 DEFAULT_STEPS = ["init", "probe", "window-pattern"]
 DEFAULT_READ_PROBES = ["0x04:4", "0x09:4", "0x0A:1", "0x0C:1"]
 ARG_UNSET = "__unset__"
+STEP_CHOICES = [
+    "reset",
+    "init",
+    "probe",
+    "window-pattern",
+    "full-white",
+    "software-reset",
+    "sleep-in",
+    "sleep-out",
+    "display-off",
+    "display-on",
+    "invert-off",
+    "invert-on",
+    "all-pixels-off",
+    "all-pixels-on",
+    "normal-on",
+]
 
 
 def _load_display_defaults(config_path: Path) -> dict[str, Any]:
@@ -120,6 +137,15 @@ def _parse_probe_spec(spec: str) -> tuple[int, int]:
         raise ValueError(f"Probe length must be positive: {length_text}")
 
     return command, length
+
+
+def _panel_cs_description(panel_cs_gpio: Optional[int], logical_spi_cs_gpio: Optional[int]) -> str:
+    """Describe how panel chip select is expected to be handled for this run."""
+    if panel_cs_gpio is not None:
+        return f"manual GPIO{panel_cs_gpio}"
+    if logical_spi_cs_gpio is not None:
+        return f"hardware SPI CE on GPIO{logical_spi_cs_gpio}"
+    return "unmanaged / tied low"
 
 
 def _hex_preview(data: bytes, limit: int = 32) -> str:
@@ -473,6 +499,16 @@ def _run_steps(
         "probe": 3,
         "window-pattern": 4,
         "full-white": 5,
+        "software-reset": 6,
+        "sleep-in": 7,
+        "sleep-out": 8,
+        "display-off": 9,
+        "display-on": 10,
+        "invert-off": 11,
+        "invert-on": 12,
+        "all-pixels-off": 13,
+        "all-pixels-on": 14,
+        "normal-on": 15,
     }
 
     for step in steps:
@@ -508,6 +544,26 @@ def _run_steps(
                 raise RuntimeError("full-white step requires the display to be initialized first")
             payload = bytes([0xFF, 0xFF]) * (display.width * display.height)
             display.write_pixels(payload)
+        elif step == "software-reset":
+            display.software_reset()
+        elif step == "sleep-in":
+            display.sleep_in()
+        elif step == "sleep-out":
+            display.sleep_out()
+        elif step == "display-off":
+            display.display_off()
+        elif step == "display-on":
+            display.display_on()
+        elif step == "invert-off":
+            display.set_inversion(False)
+        elif step == "invert-on":
+            display.set_inversion(True)
+        elif step == "all-pixels-off":
+            display.set_all_pixels(False)
+        elif step == "all-pixels-on":
+            display.set_all_pixels(True)
+        elif step == "normal-on":
+            display.normal_mode_on()
         else:
             raise ValueError(f"Unknown step: {step}")
 
@@ -537,7 +593,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--madctl", type=_parse_int)
 
-    parser.add_argument("--step", action="append", choices=["reset", "init", "probe", "window-pattern", "full-white"])
+    parser.add_argument("--step", action="append", choices=STEP_CHOICES)
     parser.add_argument("--probe", action="append", dest="probes", help="Read probe like 0x04:4")
     parser.add_argument("--window-x", type=int, default=0)
     parser.add_argument("--window-y", type=int, default=0)
@@ -619,7 +675,7 @@ def main() -> int:
             display_kwargs["spi_bus"],
             display_kwargs["spi_device"],
             logical_spi_cs_gpio,
-            "tied low / unmanaged" if display_kwargs["cs_pin"] is None else str(display_kwargs["cs_pin"]),
+            _panel_cs_description(display_kwargs["cs_pin"], logical_spi_cs_gpio),
         )
 
     analyzer_settings = _saleae_analyzer_settings(
@@ -653,6 +709,7 @@ def main() -> int:
         display_kwargs=display_kwargs,
         panel_cs_gpio=display_kwargs["cs_pin"],
         logical_spi_cs_gpio=logical_spi_cs_gpio,
+        panel_cs_description=_panel_cs_description(display_kwargs["cs_pin"], logical_spi_cs_gpio),
         marker_pin=args.marker_pin,
         recommended_saleae_channels={
             "sclk": args.saleae_sclk_channel,

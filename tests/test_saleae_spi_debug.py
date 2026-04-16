@@ -39,6 +39,21 @@ class TestSaleaeSpiDebugHelpers(unittest.TestCase):
         self.assertEqual(MODULE._infer_logical_spi_cs_gpio(0, 1), 7)
         self.assertIsNone(MODULE._infer_logical_spi_cs_gpio(1, 0))
 
+    def test_panel_cs_description_prefers_hardware_spi_context(self):
+        """The harness should describe hardware-managed CS clearly when panel CS is unset."""
+        self.assertEqual(
+            MODULE._panel_cs_description(None, 8),
+            "hardware SPI CE on GPIO8",
+        )
+        self.assertEqual(
+            MODULE._panel_cs_description(5, 8),
+            "manual GPIO5",
+        )
+        self.assertEqual(
+            MODULE._panel_cs_description(None, None),
+            "unmanaged / tied low",
+        )
+
     def test_saleae_analyzer_settings_include_available_channels(self):
         """Only provided channels should be included in analyzer settings."""
         settings = MODULE._saleae_analyzer_settings(
@@ -61,6 +76,22 @@ class TestSaleaeSpiDebugHelpers(unittest.TestCase):
             cs_channel=None,
         )
         self.assertNotIn("Enable", settings)
+
+    def test_step_choices_include_display_control_probes(self):
+        """The CLI should expose the extra display-state control steps."""
+        for step in [
+            "software-reset",
+            "sleep-in",
+            "sleep-out",
+            "display-off",
+            "display-on",
+            "invert-off",
+            "invert-on",
+            "all-pixels-off",
+            "all-pixels-on",
+            "normal-on",
+        ]:
+            self.assertIn(step, MODULE.STEP_CHOICES)
 
 
 if __name__ == "__main__":
