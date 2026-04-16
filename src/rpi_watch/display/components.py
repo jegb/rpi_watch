@@ -818,17 +818,31 @@ class CircularGauge:
         if sweep <= 0:
             return
 
-        steps = max(int(abs(sweep) * max(4.0, radius / 32.0)), 24)
-        points = [
+        half_width = max(0.5, width / 2.0)
+        outer_radius = radius + half_width
+        inner_radius = max(0.0, radius - half_width)
+        steps = max(int(abs(sweep) * max(8.0, outer_radius / 18.0)), 72)
+        angles = [angle_start + (sweep * (index / steps)) for index in range(steps + 1)]
+
+        outer_points = [
             self._point_on_circle(
                 center_x,
                 center_y,
-                radius,
-                angle_start + (sweep * (index / steps)),
+                outer_radius,
+                angle,
             )
-            for index in range(steps + 1)
+            for angle in angles
         ]
-        draw.line(points, fill=color, width=width)
+        inner_points = [
+            self._point_on_circle(
+                center_x,
+                center_y,
+                inner_radius,
+                angle,
+            )
+            for angle in reversed(angles)
+        ]
+        draw.polygon(outer_points + inner_points, fill=color)
 
         if round_start_cap is None:
             round_start_cap = rounded_caps
@@ -836,12 +850,12 @@ class CircularGauge:
             round_end_cap = rounded_caps
 
         if round_start_cap or round_end_cap:
-            cap_radius = max(1, width // 2)
+            cap_radius = max(0.5, (width / 2.0) - 0.5)
             cap_points = []
             if round_start_cap:
-                cap_points.append(points[0])
+                cap_points.append(self._point_on_circle(center_x, center_y, radius, angle_start))
             if round_end_cap:
-                cap_points.append(points[-1])
+                cap_points.append(self._point_on_circle(center_x, center_y, radius, angle_end))
             for cap_x, cap_y in cap_points:
                 draw.ellipse(
                     [
