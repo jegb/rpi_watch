@@ -1085,7 +1085,7 @@ class MetricRingLayout(DisplayLayout):
     ) -> Image.Image:
         """Render a single metric over a configurable ring."""
         track = track_color or self.color_scheme["secondary"]
-        reference_color = average_reference_color or (214, 214, 214)
+        reference_color = average_reference_color or (182, 182, 182)
         if threshold_bands:
             img = self.gauge.render_banded_ring(
                 value,
@@ -1223,11 +1223,11 @@ class MetricRingLayout(DisplayLayout):
             current_y += (bbox[3] - bbox[1]) + gap
 
         if legend_font is not None and legend_bbox is not None:
-            current_y += unit_gap
             legend_width = legend_bbox[2] - legend_bbox[0]
             legend_x = (self.width - legend_width) // 2
+            legend_y = inner_margin + available_height - (legend_bbox[3] - legend_bbox[1])
             draw.text(
-                (legend_x, current_y - legend_bbox[1]),
+                (legend_x, legend_y - legend_bbox[1]),
                 legend_label,
                 fill=reference_color,
                 font=legend_font,

@@ -37,7 +37,7 @@ DEFAULT_FIELD_PRIORITY = (
     'humidity',
 )
 
-AVERAGE_REFERENCE_COLOR = (214, 214, 214)
+AVERAGE_REFERENCE_COLOR = (182, 182, 182)
 
 FIELD_DISPLAY_DEFAULTS = {
     'pm_1_0': {'decimal_places': 1, 'title_label': 'PM1.0', 'unit_label': 'µg/m³'},

@@ -999,11 +999,23 @@ class CircularGauge:
         radius: float,
         angle: float,
         fill_color: Tuple[int, int, int],
+        outline_color: Optional[Tuple[int, int, int]] = None,
         scale: int = 1,
     ) -> None:
         """Draw a small rotated diamond centered on the ring centerline."""
         marker_x, marker_y = self._point_on_circle(center_x, center_y, radius, angle)
         diamond_radius = max(3.0 * scale, 4.5 * scale)
+        if outline_color is not None:
+            outline_radius = diamond_radius + max(1.0, 1.15 * scale)
+            draw.polygon(
+                [
+                    (marker_x, marker_y - outline_radius),
+                    (marker_x + outline_radius, marker_y),
+                    (marker_x, marker_y + outline_radius),
+                    (marker_x - outline_radius, marker_y),
+                ],
+                fill=outline_color,
+            )
         draw.polygon(
             [
                 (marker_x, marker_y - diamond_radius),
@@ -1221,6 +1233,7 @@ class CircularGauge:
                             radius=ring_radius,
                             angle=reference_marker_angle,
                             fill_color=reference_marker_fill_color or marker_fill_color,
+                            outline_color=reference_marker_outline_color or (24, 24, 24),
                             scale=scale,
                         )
                     else:
@@ -1320,6 +1333,7 @@ class CircularGauge:
                         radius=ring_radius,
                         angle=reference_marker_angle,
                         fill_color=reference_marker_fill_color or marker_fill_color,
+                        outline_color=reference_marker_outline_color or (24, 24, 24),
                         scale=scale,
                     )
                 else:
@@ -1464,6 +1478,7 @@ class CircularGauge:
                         radius=ring_radius,
                         angle=reference_marker_angle,
                         fill_color=reference_marker_fill_color or marker_fill_color or active_color,
+                        outline_color=reference_marker_outline_color or (24, 24, 24),
                         scale=scale,
                     )
                 else:
