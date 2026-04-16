@@ -84,6 +84,7 @@ class RPiWatch:
                 dc_pin=display_config.get('spi_dc_pin', 25),
                 reset_pin=display_config.get('spi_reset_pin', 27),
                 cs_pin=display_config.get('spi_cs_pin'),
+                manual_cs=display_config.get('spi_manual_cs', True),
                 madctl=display_config.get('madctl', GC9A01_SPI.DEFAULT_MADCTL),
             )
             self.display.connect()

@@ -114,12 +114,7 @@ def _parse_optional_int(value: str) -> Optional[int]:
 
 def _infer_logical_spi_cs_gpio(spi_bus: int, spi_device: int) -> Optional[int]:
     """Infer the hardware SPI chip-select GPIO for common Raspberry Pi SPI buses."""
-    if spi_bus == 0:
-        if spi_device == 0:
-            return 8
-        if spi_device == 1:
-            return 7
-    return None
+    return GC9A01_SPI.infer_chip_select_gpio(spi_bus, spi_device)
 
 
 def _parse_probe_spec(spec: str) -> tuple[int, int]:
@@ -139,10 +134,16 @@ def _parse_probe_spec(spec: str) -> tuple[int, int]:
     return command, length
 
 
-def _panel_cs_description(panel_cs_gpio: Optional[int], logical_spi_cs_gpio: Optional[int]) -> str:
+def _panel_cs_description(
+    panel_cs_gpio: Optional[int],
+    logical_spi_cs_gpio: Optional[int],
+    manual_cs: bool,
+) -> str:
     """Describe how panel chip select is expected to be handled for this run."""
-    if panel_cs_gpio is not None:
+    if manual_cs and panel_cs_gpio is not None:
         return f"manual GPIO{panel_cs_gpio}"
+    if manual_cs and logical_spi_cs_gpio is not None:
+        return f"manual inferred GPIO{logical_spi_cs_gpio}"
     if logical_spi_cs_gpio is not None:
         return f"hardware SPI CE on GPIO{logical_spi_cs_gpio}"
     return "unmanaged / tied low"
@@ -262,6 +263,7 @@ class SaleaeTracingDisplay(GC9A01_SPI):
             spi_bus=self.spi_bus,
             spi_device=self.spi_device,
             spi_speed_hz=self.spi_speed,
+            manual_cs=self.manual_cs,
             panel_cs_gpio=self.cs_pin,
             logical_spi_cs_gpio=_infer_logical_spi_cs_gpio(self.spi_bus, self.spi_device),
         )
@@ -294,25 +296,29 @@ class SaleaeTracingDisplay(GC9A01_SPI):
         if not self.spi:
             raise RuntimeError("SPI not connected. Call connect() first.")
 
-        GPIO.output(self.dc_pin, GPIO.LOW)
-        self.spi.writebytes([command])
-        self.recorder.record(
-            "spi_read_command",
-            command=command,
-            command_hex=f"0x{command:02X}",
-            length=length,
-        )
+        self._begin_transaction()
+        try:
+            GPIO.output(self.dc_pin, GPIO.LOW)
+            self._spi_write(bytes([command]))
+            self.recorder.record(
+                "spi_read_command",
+                command=command,
+                command_hex=f"0x{command:02X}",
+                length=length,
+            )
 
-        GPIO.output(self.dc_pin, GPIO.HIGH)
-        response = bytes(self.spi.xfer2([dummy_byte] * length))
-        self.recorder.record(
-            "spi_read_response",
-            command=command,
-            command_hex=f"0x{command:02X}",
-            length=length,
-            response_hex=response.hex(" ").upper(),
-        )
-        return response
+            GPIO.output(self.dc_pin, GPIO.HIGH)
+            response = bytes(self.spi.xfer2([dummy_byte] * length))
+            self.recorder.record(
+                "spi_read_response",
+                command=command,
+                command_hex=f"0x{command:02X}",
+                length=length,
+                response_hex=response.hex(" ").upper(),
+            )
+            return response
+        finally:
+            self._end_transaction()
 
 
 class SaleaeAutomationController:
@@ -537,8 +543,7 @@ def _run_steps(
                 window_x + window_size - 1,
                 window_y + window_size - 1,
             )
-            display._write_command(display.CMD_WRITE_RAM)
-            display._write_data(payload)
+            display.send_command(display.CMD_WRITE_RAM, payload)
         elif step == "full-white":
             if not display.initialized:
                 raise RuntimeError("full-white step requires the display to be initialized first")
@@ -585,11 +590,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--spi-speed", type=int)
     parser.add_argument("--dc-pin", type=int)
     parser.add_argument("--reset-pin", type=int)
+    parser.add_argument("--manual-cs", dest="manual_cs", action="store_true", default=None)
+    parser.add_argument("--hardware-cs", dest="manual_cs", action="store_false")
     parser.add_argument(
         "--cs-pin",
         type=_parse_optional_int,
         default=ARG_UNSET,
-        help="Panel CS GPIO if the display is actually wired to a controllable GPIO; not SPI0 CE0/CE1",
+        help="Panel CS GPIO for manual four-wire framing; defaults to config or inferred SPI CE pin",
     )
     parser.add_argument("--madctl", type=_parse_int)
 
@@ -660,6 +667,7 @@ def main() -> int:
         "spi_speed": args.spi_speed if args.spi_speed is not None else display_defaults.get("spi_speed", 10_000_000),
         "dc_pin": args.dc_pin if args.dc_pin is not None else display_defaults.get("spi_dc_pin", 25),
         "reset_pin": args.reset_pin if args.reset_pin is not None else display_defaults.get("spi_reset_pin", 27),
+        "manual_cs": args.manual_cs if args.manual_cs is not None else display_defaults.get("spi_manual_cs", True),
         "cs_pin": display_defaults.get("spi_cs_pin", None) if args.cs_pin == ARG_UNSET else args.cs_pin,
         "madctl": args.madctl if args.madctl is not None else display_defaults.get("madctl", GC9A01_SPI.DEFAULT_MADCTL),
     }
@@ -671,11 +679,15 @@ def main() -> int:
 
     if logical_spi_cs_gpio is not None:
         logger.info(
-            "SPI%d.%d maps to logical hardware CS GPIO%d; panel CS GPIO is %s",
+            "SPI%d.%d maps to logical hardware CS GPIO%d; panel CS mode is %s",
             display_kwargs["spi_bus"],
             display_kwargs["spi_device"],
             logical_spi_cs_gpio,
-            _panel_cs_description(display_kwargs["cs_pin"], logical_spi_cs_gpio),
+            _panel_cs_description(
+                display_kwargs["cs_pin"],
+                logical_spi_cs_gpio,
+                display_kwargs["manual_cs"],
+            ),
         )
 
     analyzer_settings = _saleae_analyzer_settings(
@@ -707,9 +719,14 @@ def main() -> int:
         steps=steps,
         probes=[f"0x{command:02X}:{length}" for command, length in probes],
         display_kwargs=display_kwargs,
+        manual_cs=display_kwargs["manual_cs"],
         panel_cs_gpio=display_kwargs["cs_pin"],
         logical_spi_cs_gpio=logical_spi_cs_gpio,
-        panel_cs_description=_panel_cs_description(display_kwargs["cs_pin"], logical_spi_cs_gpio),
+        panel_cs_description=_panel_cs_description(
+            display_kwargs["cs_pin"],
+            logical_spi_cs_gpio,
+            display_kwargs["manual_cs"],
+        ),
         marker_pin=args.marker_pin,
         recommended_saleae_channels={
             "sclk": args.saleae_sclk_channel,

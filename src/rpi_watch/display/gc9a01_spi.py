@@ -100,6 +100,16 @@ class GC9A01_SPI:
         b"\x2B\x04\x00\x00\x00\xEF"      # Row Address Set (overridden by height)
     )
 
+    @staticmethod
+    def infer_chip_select_gpio(spi_bus: int, spi_device: int) -> Optional[int]:
+        """Infer the Raspberry Pi CE GPIO for common hardware SPI devices."""
+        if spi_bus == 0:
+            if spi_device == 0:
+                return 8
+            if spi_device == 1:
+                return 7
+        return None
+
     def __init__(
         self,
         spi_bus: int = 0,
@@ -108,6 +118,7 @@ class GC9A01_SPI:
         dc_pin: int = 25,            # Data/Command
         reset_pin: int = 27,         # Reset
         cs_pin: Optional[int] = None,   # Optional manual Chip Select
+        manual_cs: bool = True,
         madctl: int = DEFAULT_MADCTL,
     ):
         """Initialize the GC9A01 SPI driver.
@@ -118,8 +129,11 @@ class GC9A01_SPI:
             spi_speed: SPI clock speed in Hz (default 10 MHz)
             dc_pin: GPIO pin for Data/Command control (BCM numbering)
             reset_pin: GPIO pin for Reset control (BCM numbering)
-            cs_pin: Optional GPIO pin for manual Chip Select control. Leave as
-                None when using the SPI controller's hardware CE line.
+            cs_pin: Optional GPIO pin for manual Chip Select control. When
+                manual_cs is enabled and cs_pin is omitted, the standard Pi CE
+                pin for spi_bus/spi_device is inferred.
+            manual_cs: When True, emulate microcontroller-style four-wire
+                framing by holding CS active across command+data transactions.
             madctl: Memory Access Control register value. Common round-panel
                 values are 0x08, 0x48, and 0x88.
         """
@@ -133,7 +147,9 @@ class GC9A01_SPI:
         self.spi_speed = spi_speed
         self.dc_pin = dc_pin
         self.reset_pin = reset_pin
-        self.cs_pin = cs_pin
+        self.manual_cs = manual_cs
+        self.logical_cs_pin = self.infer_chip_select_gpio(spi_bus, spi_device)
+        self.cs_pin = cs_pin if cs_pin is not None else (self.logical_cs_pin if manual_cs else None)
         self.madctl = self._coerce_byte(madctl, "madctl")
 
         self.width = 240
@@ -142,11 +158,19 @@ class GC9A01_SPI:
 
         self.spi = None
         self.initialized = False
+        self._batched_transaction = False
+        self._transaction_active = False
+
+        if self.manual_cs and self.cs_pin is None:
+            raise ValueError(
+                "manual_cs requires a panel CS GPIO or an inferable SPI controller CE pin"
+            )
 
         logger.info(
             f"GC9A01_SPI driver initialized (bus={spi_bus}, device={spi_device}, "
             f"speed={spi_speed/1e6:.1f}MHz, DC={dc_pin}, RST={reset_pin}, "
-            f"CS={cs_pin}, MADCTL=0x{self.madctl:02X})"
+            f"CS={self.cs_pin}, logical_cs={self.logical_cs_pin}, "
+            f"manual_cs={self.manual_cs}, MADCTL=0x{self.madctl:02X})"
         )
 
     @staticmethod
@@ -191,11 +215,14 @@ class GC9A01_SPI:
             # Configure pins as outputs
             GPIO.setup(self.dc_pin, GPIO.OUT)
             GPIO.setup(self.reset_pin, GPIO.OUT)
-            if self.cs_pin is not None:
+            if self.manual_cs and self.cs_pin is not None:
                 GPIO.setup(self.cs_pin, GPIO.OUT)
                 GPIO.output(self.cs_pin, GPIO.HIGH)  # Chip select high (inactive)
 
-            logger.info(f"GPIO configured: DC={self.dc_pin}, RST={self.reset_pin}, CS={self.cs_pin}")
+            logger.info(
+                f"GPIO configured: DC={self.dc_pin}, RST={self.reset_pin}, "
+                f"CS={self.cs_pin}, manual_cs={self.manual_cs}"
+            )
 
             # Open SPI
             self.spi = spidev.SpiDev()
@@ -204,6 +231,10 @@ class GC9A01_SPI:
             self.spi.mode = 0  # SPI mode 0 (CPOL=0, CPHA=0)
             self.spi.bits_per_word = 8
             self.spi.lsbfirst = False  # LSB first = False (MSB first)
+            if self.manual_cs:
+                if not hasattr(self.spi, "no_cs"):
+                    raise RuntimeError("spidev binding does not expose no_cs; manual_cs mode is unavailable")
+                self.spi.no_cs = True
 
             logger.info(
                 f"Connected to SPI bus {self.spi_bus}.{self.spi_device} "
@@ -217,6 +248,9 @@ class GC9A01_SPI:
 
     def disconnect(self):
         """Close SPI bus and release GPIO."""
+        self._batched_transaction = False
+        self._end_transaction()
+
         if self.spi:
             try:
                 self.spi.close()
@@ -231,6 +265,33 @@ class GC9A01_SPI:
         except Exception as e:
             logger.error(f"Error cleaning up GPIO: {e}")
 
+    def _begin_transaction(self):
+        """Assert chip select for a manual four-wire SPI transaction."""
+        if self.manual_cs and self.cs_pin is not None and not self._transaction_active:
+            GPIO.output(self.cs_pin, GPIO.LOW)
+            self._transaction_active = True
+
+    def _end_transaction(self):
+        """Release chip select after a manual four-wire SPI transaction."""
+        if self.manual_cs and self.cs_pin is not None and self._transaction_active:
+            try:
+                GPIO.output(self.cs_pin, GPIO.HIGH)
+            finally:
+                self._transaction_active = False
+
+    def _spi_write(self, payload: bytes):
+        """Send bytes over SPI without changing D/C or chip-select state."""
+        if not payload:
+            return
+
+        chunk_size = 4096
+        if len(payload) <= chunk_size:
+            self.spi.writebytes(list(payload))
+            return
+
+        for start in range(0, len(payload), chunk_size):
+            self.spi.writebytes(list(payload[start:start + chunk_size]))
+
     def _write_command(self, command: int):
         """Write a command byte to the display.
 
@@ -243,13 +304,18 @@ class GC9A01_SPI:
             raise RuntimeError("SPI not connected. Call connect() first.")
 
         try:
+            if not self._batched_transaction:
+                self._begin_transaction()
             GPIO.output(self.dc_pin, GPIO.LOW)  # DC low = command mode
-            self.spi.writebytes([command])
+            self._spi_write(bytes([command]))
             GPIO.output(self.dc_pin, GPIO.HIGH)  # DC high = data mode
             logger.debug(f"Command sent: 0x{command:02X}")
         except Exception as e:
             logger.error(f"Failed to write command 0x{command:02X}: {e}")
             raise
+        finally:
+            if not self._batched_transaction:
+                self._end_transaction()
 
     def _write_data(self, data: bytes):
         """Write data bytes to the display.
@@ -264,34 +330,18 @@ class GC9A01_SPI:
             raise RuntimeError("SPI not connected. Call connect() first.")
 
         try:
+            if not self._batched_transaction:
+                self._begin_transaction()
             GPIO.output(self.dc_pin, GPIO.HIGH)  # DC high = data mode
-
-            # Chunk large transfers to avoid SPI buffer issues
-            # Most SPI implementations have a ~4KB buffer limit
-            CHUNK_SIZE = 4096  # 4KB chunks
-
-            if len(data) <= CHUNK_SIZE:
-                # Small transfer - send directly
-                self.spi.writebytes(list(data))
-                logger.debug(f"Data sent: {len(data)} bytes")
-            else:
-                # Large transfer - send in chunks
-                chunks = len(data) // CHUNK_SIZE
-                remainder = len(data) % CHUNK_SIZE
-
-                for i in range(chunks):
-                    start = i * CHUNK_SIZE
-                    end = start + CHUNK_SIZE
-                    self.spi.writebytes(list(data[start:end]))
-
-                if remainder > 0:
-                    self.spi.writebytes(list(data[-remainder:]))
-
-                logger.debug(f"Data sent: {len(data)} bytes ({chunks} chunks + {remainder} bytes remainder)")
+            self._spi_write(data)
+            logger.debug(f"Data sent: {len(data)} bytes")
 
         except Exception as e:
             logger.error(f"Failed to write data: {e}")
             raise
+        finally:
+            if not self._batched_transaction:
+                self._end_transaction()
 
     def _write_command_data(self, command: int, data: bytes):
         """Send command followed by data.
@@ -300,9 +350,18 @@ class GC9A01_SPI:
             command: Command byte
             data: Data bytes
         """
-        self._write_command(command)
-        if data:
+        if not data:
+            self._write_command(command)
+            return
+
+        self._begin_transaction()
+        self._batched_transaction = True
+        try:
+            self._write_command(command)
             self._write_data(data)
+        finally:
+            self._batched_transaction = False
+            self._end_transaction()
 
     def send_command(self, command: int, data: bytes = b"", delay_s: float = 0.0):
         """Send a controller command with optional payload and post-command delay."""
@@ -484,12 +543,7 @@ class GC9A01_SPI:
         try:
             # Set address window to full screen
             self.set_address_window(0, 0, self.width - 1, self.height - 1)
-
-            # Write RAM command to prepare for pixel data
-            self._write_command(self.CMD_WRITE_RAM)
-
-            # Send pixel data
-            self._write_data(rgb565_data)
+            self.send_command(self.CMD_WRITE_RAM, rgb565_data)
 
             logger.debug(f"Wrote {len(rgb565_data)} bytes of pixel data")
 

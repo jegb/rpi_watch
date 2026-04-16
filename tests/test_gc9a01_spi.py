@@ -54,6 +54,13 @@ class TestGC9A01SPI(unittest.TestCase):
             ],
         )
 
+    def test_infers_manual_cs_pin_for_spi0_device0(self):
+        """Manual four-wire mode should infer the standard CE pin when omitted."""
+        driver = GC9A01_SPI()
+
+        self.assertTrue(driver.manual_cs)
+        self.assertEqual(driver.cs_pin, 8)
+
     def test_init_display_unlocks_registers_and_uses_configured_madctl(self):
         """Initialization should unlock extended registers and apply MADCTL."""
         driver = GC9A01_SPI(madctl="0x88")
@@ -130,6 +137,44 @@ class TestGC9A01SPI(unittest.TestCase):
 
         self.assertEqual(driver.madctl, 0x08)
         mock_write.assert_called_once_with(driver.CMD_MEMORY_ACCESS, bytes([0x08]))
+
+    def test_connect_enables_no_cs_in_manual_mode(self):
+        """Manual CS mode should disable hardware chip-select toggling in spidev."""
+        fake_spi = mock.Mock()
+        fake_spi.no_cs = False
+        gc9a01_module.spidev = mock.Mock(SpiDev=mock.Mock(return_value=fake_spi))
+
+        driver = GC9A01_SPI(cs_pin=8, manual_cs=True)
+        driver.connect()
+
+        fake_spi.open.assert_called_once_with(0, 0)
+        self.assertTrue(fake_spi.no_cs)
+
+    def test_write_command_data_keeps_manual_cs_low_across_transaction(self):
+        """Command+data pairs should share one CS-low window in manual mode."""
+        driver = GC9A01_SPI(cs_pin=8, manual_cs=True)
+        driver.spi = mock.Mock()
+        gc9a01_module.GPIO.output.reset_mock()
+
+        driver._write_command_data(0x2A, b"\x00\x00\x00\xEF")
+
+        self.assertEqual(
+            gc9a01_module.GPIO.output.call_args_list,
+            [
+                mock.call(driver.cs_pin, gc9a01_module.GPIO.LOW),
+                mock.call(driver.dc_pin, gc9a01_module.GPIO.LOW),
+                mock.call(driver.dc_pin, gc9a01_module.GPIO.HIGH),
+                mock.call(driver.dc_pin, gc9a01_module.GPIO.HIGH),
+                mock.call(driver.cs_pin, gc9a01_module.GPIO.HIGH),
+            ],
+        )
+        self.assertEqual(
+            driver.spi.writebytes.call_args_list,
+            [
+                mock.call([0x2A]),
+                mock.call([0x00, 0x00, 0x00, 0xEF]),
+            ],
+        )
 
     def test_send_command_supports_optional_payload_and_delay(self):
         """Generic command sending should support data payloads and delays."""

@@ -1,13 +1,14 @@
 display:
   # SPI Configuration (Raspberry Pi hardware SPI)
   spi_bus: 0                 # SPI bus 0 (/dev/spidev0.x)
-  spi_device: 0              # SPI device 0 (/dev/spidev0.0 -> hardware CE0 on GPIO 8)
+  spi_device: 0              # SPI device 0 (/dev/spidev0.0 -> panel CS on GPIO 8)
   spi_speed: 1000000        # Clock speed 1 MHz (can go up to 40-50 MHz)
 
   # Display control GPIOs (BCM numbering)
   spi_dc_pin: 25             # GPIO 25 - Data/Command line (DC/RS)
   spi_reset_pin: 27          # GPIO 27 - Reset line (RES)
-  spi_cs_pin: null           # Panel CS is wired to SPI0 CE0 (GPIO 8); leave null unless manually driving CS
+  spi_cs_pin: 8              # GPIO 8 - Panel chip select, driven manually for microcontroller-style four-wire framing
+  spi_manual_cs: true        # Disable hardware CE and hold CS low across command+data transactions
 
   # Display Settings
   width: 240

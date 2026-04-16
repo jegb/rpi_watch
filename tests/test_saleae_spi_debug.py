@@ -42,15 +42,19 @@ class TestSaleaeSpiDebugHelpers(unittest.TestCase):
     def test_panel_cs_description_prefers_hardware_spi_context(self):
         """The harness should describe hardware-managed CS clearly when panel CS is unset."""
         self.assertEqual(
-            MODULE._panel_cs_description(None, 8),
+            MODULE._panel_cs_description(None, 8, False),
             "hardware SPI CE on GPIO8",
         )
         self.assertEqual(
-            MODULE._panel_cs_description(5, 8),
+            MODULE._panel_cs_description(5, 8, True),
             "manual GPIO5",
         )
         self.assertEqual(
-            MODULE._panel_cs_description(None, None),
+            MODULE._panel_cs_description(None, 8, True),
+            "manual inferred GPIO8",
+        )
+        self.assertEqual(
+            MODULE._panel_cs_description(None, None, False),
             "unmanaged / tied low",
         )
 
