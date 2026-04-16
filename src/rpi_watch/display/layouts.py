@@ -688,6 +688,22 @@ class PMBarsLayout(DisplayLayout):
         padded_max = max_reading + max(padding_min, max_reading * padding_ratio)
         return max(1.0, float(auto_scale_floor), padded_max)
 
+    @staticmethod
+    def _resolve_reference_value(
+        payload: Dict[str, Any],
+        field_name: str,
+    ) -> Optional[float]:
+        """Return a reference average for the field when available."""
+        for candidate in (f"{field_name}_avg_24h", f"{field_name}_day_avg"):
+            try:
+                value = payload.get(candidate)
+                if value is None:
+                    continue
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
     def render(
         self,
         payload: Dict[str, Any],
@@ -701,6 +717,7 @@ class PMBarsLayout(DisplayLayout):
         orientation: str = "vertical",
         bar_gap: int = 6,
         scale_padding_ratio: float = 0.18,
+        show_average_reference: bool = True,
     ) -> Image.Image:
         """Render four PM bars from the current payload."""
         img = Image.new('RGB', (self.width, self.height), self.bg_color)
@@ -764,13 +781,21 @@ class PMBarsLayout(DisplayLayout):
             total_width = (column_width * column_count) + (gap * (column_count - 1))
             start_x = (self.width - total_width) // 2
 
+            columns = []
+            common_safe_top = content_top
+            common_safe_bottom = content_bottom
+            max_value_height = 0
+            max_label_height = 0
+            reference_values: dict[str, Optional[float]] = {}
+
             for index, ((field_name, label), value) in enumerate(zip(normalized_fields, values)):
                 column_left = start_x + (index * (column_width + gap))
                 column_right = column_left + column_width
                 safe_top, safe_bottom = self._safe_vertical_bounds(column_left, column_right, inset=10)
                 safe_top = max(content_top, safe_top + 4)
                 safe_bottom = min(content_bottom, safe_bottom - 4)
-                row_color = colors.get(field_name, self.color_scheme["accent"])
+                common_safe_top = max(common_safe_top, safe_top)
+                common_safe_bottom = min(common_safe_bottom, safe_bottom)
 
                 value_text = f"{value:.1f}"
                 value_font, value_bbox = self.text_renderer.fit_font(
@@ -782,6 +807,7 @@ class PMBarsLayout(DisplayLayout):
                 )
                 value_width_actual = value_bbox[2] - value_bbox[0]
                 value_height = value_bbox[3] - value_bbox[1]
+                max_value_height = max(max_value_height, value_height)
 
                 label_font, label_bbox = self.text_renderer.fit_font(
                     label,
@@ -792,14 +818,41 @@ class PMBarsLayout(DisplayLayout):
                 )
                 label_width_actual = label_bbox[2] - label_bbox[0]
                 label_height = label_bbox[3] - label_bbox[1]
+                max_label_height = max(max_label_height, label_height)
 
-                value_y = safe_top
-                label_y = safe_bottom - label_height
-                bar_top = value_y + value_height + 6
-                bar_bottom = label_y - 6
-                if bar_bottom - bar_top < 26:
-                    bar_top = value_y + value_height + 3
-                    bar_bottom = max(bar_top + 26, safe_bottom - label_height - 3)
+                reference_values[field_name] = self._resolve_reference_value(payload, field_name)
+                columns.append(
+                    {
+                        "field_name": field_name,
+                        "label": label,
+                        "value": value,
+                        "column_left": column_left,
+                        "column_right": column_right,
+                        "value_text": value_text,
+                        "value_font": value_font,
+                        "value_bbox": value_bbox,
+                        "value_width_actual": value_width_actual,
+                        "label_font": label_font,
+                        "label_bbox": label_bbox,
+                        "label_width_actual": label_width_actual,
+                    }
+                )
+
+            common_value_y = common_safe_top
+            common_label_y = common_safe_bottom - max_label_height
+            bar_top = common_value_y + max_value_height + 6
+            bar_bottom = common_label_y - 6
+            if bar_bottom - bar_top < 26:
+                bar_top = common_value_y + max_value_height + 3
+                bar_bottom = max(bar_top + 26, common_safe_bottom - max_label_height - 3)
+
+            for column in columns:
+                field_name = column["field_name"]
+                label = column["label"]
+                value = column["value"]
+                column_left = column["column_left"]
+                column_right = column["column_right"]
+                row_color = colors.get(field_name, self.color_scheme["accent"])
                 if bar_bottom <= bar_top:
                     continue
                 bar_left = column_left + 2
@@ -807,16 +860,22 @@ class PMBarsLayout(DisplayLayout):
                 bar_radius = max(4, min((bar_right - bar_left) // 2, 10))
 
                 draw.text(
-                    (column_left + ((column_width - value_width_actual) // 2), value_y - value_bbox[1]),
-                    value_text,
+                    (
+                        column_left + ((column_width - column["value_width_actual"]) // 2),
+                        common_value_y - column["value_bbox"][1],
+                    ),
+                    column["value_text"],
                     fill=self.color_scheme["primary"],
-                    font=value_font,
+                    font=column["value_font"],
                 )
                 draw.text(
-                    (column_left + ((column_width - label_width_actual) // 2), label_y - label_bbox[1]),
+                    (
+                        column_left + ((column_width - column["label_width_actual"]) // 2),
+                        common_label_y - column["label_bbox"][1],
+                    ),
                     label,
                     fill=self.color_scheme["secondary"],
-                    font=label_font,
+                    font=column["label_font"],
                 )
 
                 draw.rounded_rectangle(
@@ -839,6 +898,22 @@ class PMBarsLayout(DisplayLayout):
                         fill_color=row_color,
                         radius=bar_radius,
                     )
+                if show_average_reference:
+                    reference_value = reference_values.get(field_name)
+                    if reference_value is not None:
+                        reference_ratio = max(0.0, min(1.0, reference_value / scale_max))
+                        reference_y = bar_bottom - int(bar_height * reference_ratio)
+                        line_left = bar_left + 2
+                        line_right = bar_right - 2
+                        if line_right > line_left:
+                            draw.line(
+                                [
+                                    (line_left, reference_y),
+                                    (line_right, reference_y),
+                                ],
+                                fill=self.color_scheme["secondary"],
+                                width=1,
+                            )
         else:
             row_count = max(1, len(normalized_fields))
             row_height = max(18, int((content_bottom - content_top - (gap * (row_count - 1))) / row_count))
