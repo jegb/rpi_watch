@@ -173,7 +173,61 @@ If you want to watch only the MQTT path first:
 PYTHONPATH=src python3 scripts/test_mqtt_subscription.py --timeout 20
 ```
 
-## 9. Troubleshooting
+## 9. Production Deployment
+
+On the deployed watch, the app runs as `rpi_watch.service` so it survives SSH logout and starts on boot.
+
+Check the current service state:
+
+```bash
+systemctl status rpi_watch
+systemctl is-enabled rpi_watch
+sudo journalctl -u rpi_watch -f
+```
+
+Typical operations:
+
+```bash
+sudo systemctl restart rpi_watch
+sudo systemctl stop rpi_watch
+sudo systemctl start rpi_watch
+```
+
+If the service is missing, create `/etc/systemd/system/rpi_watch.service`:
+
+```ini
+[Unit]
+Description=RPi Watch Display App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/rpi_watch
+Environment=PYTHONPATH=/home/pi/rpi_watch/src
+ExecStart=/home/pi/rpi_watch/venv/bin/python3 -m rpi_watch.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now rpi_watch
+```
+
+Use `mosquitto_sub` only for MQTT diagnostics. It is a foreground tool and stops when the shell exits:
+
+```bash
+mosquitto_sub -h 127.0.0.1 -t airquality/sensor -v
+```
+
+## 10. Troubleshooting
 
 ### Tiny text or broken glyphs
 

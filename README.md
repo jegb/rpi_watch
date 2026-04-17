@@ -69,6 +69,40 @@ Run the app:
 PYTHONPATH=src python3 -m rpi_watch.main
 ```
 
+For production on the watch, run the app under `systemd` so it survives SSH logout and reboot:
+
+```bash
+systemctl status rpi_watch
+sudo systemctl restart rpi_watch
+sudo journalctl -u rpi_watch -f
+```
+
+If the service is not installed yet, create `/etc/systemd/system/rpi_watch.service` with an `ExecStart` that points at your repo checkout and virtualenv, then enable it:
+
+```ini
+[Unit]
+Description=RPi Watch Display App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/rpi_watch
+Environment=PYTHONPATH=/home/pi/rpi_watch/src
+ExecStart=/home/pi/rpi_watch/venv/bin/python3 -m rpi_watch.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now rpi_watch
+```
+
 ## Configuration
 
 Primary runtime config is [`config/config.yaml`](config/config.yaml).
@@ -185,6 +219,8 @@ If MQTT connects but no values appear, verify the broker and topic independently
 ```bash
 mosquitto_sub -h 192.168.0.214 -t airquality/sensor -v
 ```
+
+`mosquitto_sub` is only a foreground diagnostic tool. It exits when the shell exits, unlike `rpi_watch.service`.
 
 ## Additional Docs
 
