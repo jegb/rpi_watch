@@ -265,14 +265,19 @@ setup_configuration() {
     section "CONFIGURING APPLICATION"
 
     log "Checking for config file..."
+    if [ ! -f "$SCRIPT_DIR/config/config.yaml" ] && [ -f "$SCRIPT_DIR/config/config.yaml.example" ]; then
+        cp "$SCRIPT_DIR/config/config.yaml.example" "$SCRIPT_DIR/config/config.yaml"
+        success "Created local config.yaml from config.yaml.example"
+    fi
+
     if [ -f "$SCRIPT_DIR/config/config.yaml" ]; then
         success "config.yaml found"
 
         read -p "Do you want to update the MQTT broker address? (y/n) " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            read -p "Enter MQTT broker IP (default 192.168.0.214): " mqtt_ip
-            mqtt_ip=${mqtt_ip:-192.168.0.214}
+            read -p "Enter MQTT broker IP (default 127.0.0.1): " mqtt_ip
+            mqtt_ip=${mqtt_ip:-127.0.0.1}
 
             # Update config using Python
             python3 << EOF
@@ -292,7 +297,7 @@ EOF
             success "Configuration updated"
         fi
     else
-        warn "config.yaml not found. Please review config section in docs/guides/SETUP_GUIDE.md"
+        warn "config.yaml not found. Copy config/config.yaml.example to config/config.yaml and review docs/guides/SETUP_GUIDE.md"
     fi
 }
 
@@ -315,7 +320,7 @@ print_instructions() {
     echo "   - GC9A01 Pin 6 (DC) → Raspberry Pi GPIO 24"
     echo ""
     echo "2. Verify MQTT broker is running:"
-    echo "   ping 192.168.0.214"
+    echo "   mosquitto_sub -h 127.0.0.1 -t airquality/sensor -C 1 -v"
     echo ""
     echo "3. Run the main application:"
     echo "   source $VENV_DIR/bin/activate"

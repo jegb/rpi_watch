@@ -63,6 +63,12 @@ pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 ```
 
+Create the local device config from the tracked example:
+
+```bash
+cp config/config.yaml.example config/config.yaml
+```
+
 Run the app:
 
 ```bash
@@ -105,7 +111,7 @@ sudo systemctl enable --now rpi_watch
 
 ## Configuration
 
-Primary runtime config is [`config/config.yaml`](config/config.yaml).
+Primary runtime config is your local `config/config.yaml`, created from the tracked example at [`config/config.yaml.example`](config/config.yaml.example).
 
 Key sections:
 - `display`: SPI bus, control pins, refresh rate, `madctl`
@@ -234,7 +240,7 @@ fc-match "DejaVu Sans:style=Bold"
 If MQTT connects but no values appear, verify the broker and topic independently:
 
 ```bash
-mosquitto_sub -h 192.168.0.214 -t airquality/sensor -v
+mosquitto_sub -h 127.0.0.1 -t airquality/sensor -v
 ```
 
 `mosquitto_sub` is only a foreground diagnostic tool. It exits when the shell exits, unlike `rpi_watch.service`.

@@ -18,7 +18,7 @@ display:
   refresh_rate_hz: 5         # Updates per second (SPI can handle higher refresh rates)
 
 mqtt:
-  broker_host: "192.168.0.214"   # SPS Monitor MQTT broker
+  broker_host: "127.0.0.1"       # Local Mosquitto broker on the watch
   broker_port: 1883
   topic: "airquality/sensor"     # SPS Monitor topic (publishes JSON with pm_2_5, temp, humidity, pm_1_0, pm_4_0, pm_10_0)
   qos: 1                         # Quality of service level (0=at most once, 1=at least once, 2=exactly once)

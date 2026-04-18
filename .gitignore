@@ -48,6 +48,7 @@ htmlcov/
 logs/
 
 # Local configuration (don't commit)
+config/config.yaml
 config/config.local.yaml
 config/config.dev.yaml
 

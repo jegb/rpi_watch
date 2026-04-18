@@ -138,6 +138,12 @@ class RPiWatch:
         config_file = Path(config_path)
 
         if not config_file.exists():
+            example_path = config_file.with_name(f"{config_file.name}.example")
+            if example_path.exists():
+                raise FileNotFoundError(
+                    f"Configuration file not found: {config_path}. "
+                    f"Copy {example_path} to {config_file} and edit it for this device."
+                )
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
         try:
