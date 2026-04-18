@@ -200,6 +200,7 @@ class RPiWatch:
 
             # Initialize MQTT subscriber
             mqtt_config = self.config.get('mqtt', {})
+            state_config = self.config.get('state', {})
             self.mqtt_subscriber = MQTTSubscriber(
                 broker_host=mqtt_config.get('broker_host', 'localhost'),
                 broker_port=mqtt_config.get('broker_port', 1883),
@@ -207,7 +208,8 @@ class RPiWatch:
                 qos=mqtt_config.get('qos', 1),
                 keepalive=mqtt_config.get('keepalive', 60),
                 metric_store=self.metric_store,
-                json_field=mqtt_config.get('json_field')
+                json_field=mqtt_config.get('json_field'),
+                record_path=state_config.get('record_path'),
             )
 
             logger.info("All components initialized successfully")

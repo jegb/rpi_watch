@@ -110,6 +110,7 @@ Primary runtime config is [`config/config.yaml`](config/config.yaml).
 Key sections:
 - `display`: SPI bus, control pins, refresh rate, `madctl`
 - `mqtt`: broker host, port, topic, QoS
+- `state`: bounded cache plus append-only receive log paths
 - `metric_display`: layout mode, fonts, labels, sparkline settings, PM bar colors, ring thresholds
 
 The current layout switch is:
@@ -145,6 +146,22 @@ metric_display:
   ring_start_angle: 135.0
   ring_end_angle: 405.0
 ```
+
+The watch also keeps a durable append-only MQTT receive log for later extraction and model training:
+
+```yaml
+state:
+  cache_path: "data/metric_store.json"
+  history_size: 50
+  record_path: "data/mqtt_records.jsonl"
+```
+
+`record_path` is written in JSONL format, one received MQTT message per line, with:
+- host-side receive timestamp (`received_at`, `received_at_iso`)
+- MQTT topic
+- selected display field/value
+- flattened payload fields
+- the original raw payload string
 
 ## Testing And Demos
 

@@ -15,6 +15,7 @@ except ImportError:
     mqtt = None
 
 from ..metrics import MetricStore
+from .recorder import MQTTRecordLogger
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class MQTTSubscriber:
         keepalive: int = 60,
         metric_store=None,
         json_field: Optional[str] = None,
+        record_path: Optional[str] = None,
     ):
         """Initialize MQTT subscriber.
 
@@ -47,6 +49,7 @@ class MQTTSubscriber:
             metric_store: MetricStore object for storing received values
             json_field: Optional preferred field name used when a payload contains
                        multiple numeric fields. The full payload is still stored.
+            record_path: Optional append-only JSONL path for received MQTT records
         """
         if mqtt is None:
             raise RuntimeError("paho-mqtt not installed. Install via: pip install paho-mqtt")
@@ -58,6 +61,8 @@ class MQTTSubscriber:
         self.keepalive = keepalive
         self.metric_store = metric_store
         self.json_field = json_field
+        self.record_path = record_path
+        self.record_logger = MQTTRecordLogger(record_path) if record_path else None
 
         # Use VERSION1 API (warnings filtered globally above)
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
@@ -78,8 +83,34 @@ class MQTTSubscriber:
 
         logger.info(
             f"MQTTSubscriber initialized: broker={broker_host}:{broker_port}, "
-            f"topic={topic}, qos={qos}"
+            f"topic={topic}, qos={qos}, record_path={record_path}"
         )
+
+    def _record_message(
+        self,
+        *,
+        topic: str,
+        received_at: float,
+        raw_payload: str,
+        payload: Any,
+        selected_field: Optional[str],
+        selected_value: Optional[float],
+    ) -> None:
+        """Append a received MQTT message to the optional JSONL record log."""
+        if self.record_logger is None:
+            return
+
+        try:
+            self.record_logger.append(
+                topic=topic,
+                received_at=received_at,
+                raw_payload=raw_payload,
+                payload=payload,
+                selected_field=selected_field,
+                selected_value=selected_value,
+            )
+        except Exception as exc:
+            logger.warning("Failed to append MQTT record to %s: %s", self.record_path, exc)
 
     def _on_connect(self, client, userdata, flags, rc):
         """Called when connected to broker."""
@@ -112,6 +143,7 @@ class MQTTSubscriber:
     def _on_message(self, client, userdata, msg):
         """Called when message is received on subscribed topic."""
         try:
+            received_at = time.time()
             payload = msg.payload.decode('utf-8')
             logger.debug(f"Message received on {msg.topic}: {payload}")
 
@@ -148,7 +180,15 @@ class MQTTSubscriber:
                 if value is None:
                     logger.warning(f"Could not extract numeric value from JSON payload: {payload}")
                     self.last_payload = normalized_payload
-                    self.last_update_time = time.time()
+                    self.last_update_time = received_at
+                    self._record_message(
+                        topic=msg.topic,
+                        received_at=received_at,
+                        raw_payload=payload,
+                        payload=normalized_payload,
+                        selected_field=selected_field,
+                        selected_value=value,
+                    )
                     return
             elif isinstance(data, (int, float)):
                 value = float(data)
@@ -161,7 +201,15 @@ class MQTTSubscriber:
             self.last_value = value
             self.last_field = selected_field
             self.last_payload = normalized_payload
-            self.last_update_time = time.time()
+            self.last_update_time = received_at
+            self._record_message(
+                topic=msg.topic,
+                received_at=received_at,
+                raw_payload=payload,
+                payload=normalized_payload if normalized_payload is not None else value,
+                selected_field=selected_field,
+                selected_value=value,
+            )
 
             if selected_field:
                 logger.info(f"Updated metric: {selected_field}={value}")

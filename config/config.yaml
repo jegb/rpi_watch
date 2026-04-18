@@ -28,6 +28,7 @@ mqtt:
 state:
   cache_path: "data/metric_store.json"  # Last known payload/history cache used to seed startup before MQTT refreshes
   history_size: 50
+  record_path: "data/mqtt_records.jsonl"  # Append-only JSONL receive log with host-side timestamps for later extraction/training
 
 metric_display:
   layout_mode: "single_metric"   # single_metric, pm_bars, metric_ring
