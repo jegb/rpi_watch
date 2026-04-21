@@ -158,6 +158,7 @@ The watch also keeps a durable append-only MQTT receive log for later extraction
 ```yaml
 state:
   cache_path: "data/metric_store.json"
+  stale_after_seconds: 300
   history_size: 50
   record_path: "data/mqtt_records.jsonl"
 ```
@@ -168,6 +169,8 @@ state:
 - selected display field/value
 - flattened payload fields
 - the original raw payload string
+
+`stale_after_seconds` controls how long the watch may reuse the most recent MQTT sample. After that timeout, the display falls back to the configured placeholder (default `--.-`) until a new message arrives, and any locally computed average uses only the latest continuous run of timestamped samples.
 
 ## Testing And Demos
 

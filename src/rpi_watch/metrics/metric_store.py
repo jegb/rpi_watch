@@ -91,6 +91,47 @@ class MetricStore:
             }
         )
 
+    @staticmethod
+    def _resolve_current_time(current_time: Optional[float]) -> float:
+        """Normalize an optional current-time override."""
+        if current_time is None:
+            return time.time()
+        return float(current_time)
+
+    @classmethod
+    def _is_timestamp_fresh(
+        cls,
+        timestamp: Optional[float],
+        *,
+        max_age_seconds: Optional[float],
+        current_time: Optional[float] = None,
+    ) -> bool:
+        """Return whether a timestamp is fresh enough for live display use."""
+        if timestamp is None:
+            return False
+        if max_age_seconds is None:
+            return True
+        return (cls._resolve_current_time(current_time) - float(timestamp)) <= float(max_age_seconds)
+
+    @staticmethod
+    def _extract_continuous_tail(
+        series: list[tuple[float, float]],
+        *,
+        max_gap_seconds: Optional[float],
+    ) -> list[tuple[float, float]]:
+        """Return the latest uninterrupted segment from a chronological series."""
+        if not series or max_gap_seconds is None:
+            return list(series)
+
+        continuity_start_index = 0
+        for index in range(len(series) - 1, 0, -1):
+            gap_seconds = float(series[index][0]) - float(series[index - 1][0])
+            if gap_seconds > float(max_gap_seconds):
+                continuity_start_index = index
+                break
+
+        return series[continuity_start_index:]
+
     def _serialize_state_locked(self) -> dict[str, Any]:
         """Serialize current state for persistence."""
         return {
@@ -341,25 +382,70 @@ class MetricStore:
 
         return (selected_field, selected_value)
 
-    def get_latest(self) -> Optional[float]:
+    def get_latest(
+        self,
+        *,
+        max_age_seconds: Optional[float] = None,
+        current_time: Optional[float] = None,
+    ) -> Optional[float]:
         """Get the most recent selected metric value."""
         with self._lock:
-            return self._value
+            value = self._value
+            timestamp = self._timestamp
+
+        if not self._is_timestamp_fresh(
+            timestamp,
+            max_age_seconds=max_age_seconds,
+            current_time=current_time,
+        ):
+            return None
+
+        return value
 
     def get_with_timestamp(self) -> Tuple[Optional[float], Optional[float]]:
         """Get the metric value along with timestamp."""
         with self._lock:
             return (self._value, self._timestamp)
 
-    def get_payload(self) -> Optional[dict[str, Any]]:
+    def get_payload(
+        self,
+        *,
+        max_age_seconds: Optional[float] = None,
+        current_time: Optional[float] = None,
+    ) -> Optional[dict[str, Any]]:
         """Get the most recent payload snapshot."""
         with self._lock:
-            return self._copy_payload(self._payload)
+            payload = self._copy_payload(self._payload)
+            timestamp = self._timestamp
 
-    def get_numeric_payload(self) -> dict[str, float]:
+        if not self._is_timestamp_fresh(
+            timestamp,
+            max_age_seconds=max_age_seconds,
+            current_time=current_time,
+        ):
+            return None
+
+        return payload
+
+    def get_numeric_payload(
+        self,
+        *,
+        max_age_seconds: Optional[float] = None,
+        current_time: Optional[float] = None,
+    ) -> dict[str, float]:
         """Get numeric payload fields only."""
         with self._lock:
-            return self.extract_numeric_payload(self._payload)
+            payload = self._copy_payload(self._payload)
+            timestamp = self._timestamp
+
+        if not self._is_timestamp_fresh(
+            timestamp,
+            max_age_seconds=max_age_seconds,
+            current_time=current_time,
+        ):
+            return {}
+
+        return self.extract_numeric_payload(payload)
 
     def get_history(self, limit: Optional[int] = None) -> list[dict[str, Any]]:
         """Get recent reading snapshots in chronological order."""
@@ -377,10 +463,15 @@ class MetricStore:
         self,
         field_name: str,
         limit: Optional[int] = None,
+        max_gap_seconds: Optional[float] = None,
+        max_age_seconds: Optional[float] = None,
+        current_time: Optional[float] = None,
     ) -> list[tuple[float, float]]:
         """Get a time series for a specific numeric field."""
         series: list[tuple[float, float]] = []
-        for entry in self.get_history(limit=limit):
+        use_full_history = max_gap_seconds is not None or max_age_seconds is not None
+        history_entries = self.get_history(limit=None if use_full_history else limit)
+        for entry in history_entries:
             payload = entry["payload"]
             if payload is not None and field_name in payload:
                 try:
@@ -389,17 +480,101 @@ class MetricStore:
                     continue
             elif entry["field"] == field_name and entry["value"] is not None:
                 series.append((entry["timestamp"], float(entry["value"])))
+        if not use_full_history:
+            return series
+
+        if not series:
+            return []
+
+        if not self._is_timestamp_fresh(
+            series[-1][0],
+            max_age_seconds=max_age_seconds,
+            current_time=current_time,
+        ):
+            return []
+
+        series = self._extract_continuous_tail(
+            series,
+            max_gap_seconds=max_gap_seconds,
+        )
+
+        if limit is not None:
+            if limit <= 0:
+                return []
+            series = series[-limit:]
+
         return series
 
-    def get_field(self, field_name: str) -> Optional[float]:
+    def get_field(
+        self,
+        field_name: str,
+        *,
+        max_age_seconds: Optional[float] = None,
+        current_time: Optional[float] = None,
+    ) -> Optional[float]:
         """Get a single numeric field from the current payload."""
         with self._lock:
-            if self._payload is None:
-                return None
-            try:
-                return self._coerce_numeric(self._payload[field_name])
-            except (KeyError, TypeError, ValueError):
-                return None
+            payload = self._copy_payload(self._payload)
+            timestamp = self._timestamp
+
+        if payload is None:
+            return None
+
+        if not self._is_timestamp_fresh(
+            timestamp,
+            max_age_seconds=max_age_seconds,
+            current_time=current_time,
+        ):
+            return None
+
+        try:
+            return self._coerce_numeric(payload[field_name])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def get_field_average(
+        self,
+        field_name: str,
+        *,
+        limit: Optional[int] = None,
+        max_gap_seconds: Optional[float] = None,
+        max_age_seconds: Optional[float] = None,
+        current_time: Optional[float] = None,
+    ) -> Optional[float]:
+        """Return a time-weighted average over the latest continuous sample run."""
+        series = self.get_field_history(
+            field_name,
+            limit=limit,
+            max_gap_seconds=max_gap_seconds,
+            max_age_seconds=max_age_seconds,
+            current_time=current_time,
+        )
+        if not series:
+            return None
+
+        if len(series) == 1:
+            return float(series[0][1])
+
+        resolved_current_time = self._resolve_current_time(current_time)
+        weighted_total = 0.0
+        total_duration = 0.0
+        for index, (timestamp, value) in enumerate(series):
+            if index + 1 < len(series):
+                next_timestamp = float(series[index + 1][0])
+            else:
+                next_timestamp = resolved_current_time
+
+            duration_seconds = max(0.0, next_timestamp - float(timestamp))
+            if duration_seconds <= 0.0:
+                continue
+
+            weighted_total += float(value) * duration_seconds
+            total_duration += duration_seconds
+
+        if total_duration <= 0.0:
+            return float(series[-1][1])
+
+        return weighted_total / total_duration
 
     def get_selected_field(self) -> Optional[str]:
         """Get the field associated with the latest selected metric value."""
@@ -413,10 +588,41 @@ class MetricStore:
                 return None
             return time.time() - self._timestamp
 
-    def has_value(self) -> bool:
+    def is_stale(
+        self,
+        *,
+        max_age_seconds: Optional[float],
+        current_time: Optional[float] = None,
+    ) -> bool:
+        """Return whether the latest reading is older than the allowed age."""
+        with self._lock:
+            timestamp = self._timestamp
+
+        return not self._is_timestamp_fresh(
+            timestamp,
+            max_age_seconds=max_age_seconds,
+            current_time=current_time,
+        )
+
+    def has_value(
+        self,
+        *,
+        max_age_seconds: Optional[float] = None,
+        current_time: Optional[float] = None,
+    ) -> bool:
         """Check if a metric value has been set."""
         with self._lock:
-            return self._value is not None
+            value = self._value
+            timestamp = self._timestamp
+
+        if value is None:
+            return False
+
+        return self._is_timestamp_fresh(
+            timestamp,
+            max_age_seconds=max_age_seconds,
+            current_time=current_time,
+        )
 
     def reset(self) -> None:
         """Reset the metric store to initial state."""

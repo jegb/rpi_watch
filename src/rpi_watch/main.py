@@ -254,15 +254,31 @@ class RPiWatch:
         """Return the configured render layout mode."""
         return str(self._get_metric_display_config().get('layout_mode', 'single_metric')).lower()
 
+    def _get_stale_after_seconds(self) -> float:
+        """Return the max age for a sample before it is hidden from the display."""
+        state_config = self.config.get('state', {})
+        try:
+            return max(1.0, float(state_config.get('stale_after_seconds', 300.0)))
+        except (TypeError, ValueError):
+            return 300.0
+
     def _get_history_tail(
         self,
         field_name: str,
         *,
         limit: Optional[int] = None,
+        current_time: Optional[float] = None,
     ) -> list[tuple[float, float]]:
         """Return recent history for a field."""
         history_limit = limit or self._get_metric_display_config().get('sparkline_points', 10)
-        return self.metric_store.get_field_history(field_name, limit=history_limit)
+        stale_after_seconds = self._get_stale_after_seconds()
+        return self.metric_store.get_field_history(
+            field_name,
+            limit=history_limit,
+            max_gap_seconds=stale_after_seconds,
+            max_age_seconds=stale_after_seconds,
+            current_time=current_time,
+        )
 
     def _get_metric_value_color(
         self,
@@ -279,9 +295,11 @@ class RPiWatch:
         self,
         field_name: Optional[str],
         payload: Optional[dict],
+        *,
+        current_time: Optional[float] = None,
     ) -> Optional[dict]:
         """Return the preferred average reference value and legend for a field."""
-        if not field_name or not payload:
+        if not field_name:
             return None
 
         metric_config = self._get_metric_display_config()
@@ -290,23 +308,41 @@ class RPiWatch:
             AVERAGE_REFERENCE_COLOR,
         )
 
-        candidates = (
-            (f"{field_name}_avg_24h", "◆ 24h avg"),
-            (f"{field_name}_day_avg", "◆ daily avg."),
-        )
-        for key, label in candidates:
-            try:
-                numeric_value = float(payload.get(key))
-            except (TypeError, ValueError):
-                continue
-            return {
-                'field': key,
-                'value': numeric_value,
-                'label': label,
-                'color': reference_color,
-            }
+        if payload:
+            candidates = (
+                (f"{field_name}_avg_24h", "◆ 24h avg"),
+                (f"{field_name}_day_avg", "◆ daily avg."),
+            )
+            for key, label in candidates:
+                try:
+                    numeric_value = float(payload.get(key))
+                except (TypeError, ValueError):
+                    continue
+                return {
+                    'field': key,
+                    'value': numeric_value,
+                    'label': label,
+                    'color': reference_color,
+                    'source': 'payload',
+                }
 
-        return None
+        stale_after_seconds = self._get_stale_after_seconds()
+        live_average = self.metric_store.get_field_average(
+            field_name,
+            max_gap_seconds=stale_after_seconds,
+            max_age_seconds=stale_after_seconds,
+            current_time=current_time,
+        )
+        if live_average is None:
+            return None
+
+        return {
+            'field': f"{field_name}_live_avg",
+            'value': live_average,
+            'label': '◆ live avg',
+            'color': reference_color,
+            'source': 'local',
+        }
 
     def _get_guidance_payload(self, payload: Optional[dict]) -> Optional[dict]:
         """Return a payload variant that prefers average PM values for guidance coloring."""
@@ -317,7 +353,8 @@ class RPiWatch:
         for field_name in ('pm_2_5', 'pm_10_0'):
             average_reference = self._get_average_reference(field_name, payload)
             if average_reference is not None:
-                guidance_payload[field_name] = average_reference['value']
+                if average_reference.get('source') == 'payload':
+                    guidance_payload[field_name] = average_reference['value']
         return guidance_payload
 
     def _get_ring_profile(self, field_name: Optional[str]) -> dict:
@@ -576,7 +613,11 @@ class RPiWatch:
             'title_label': display_metadata['title_label'],
             'unit_label': display_metadata['unit_label'],
             'value_color': self._get_metric_value_color(field_name, payload) if guidance_bands else None,
-            'average_reference': self._get_average_reference(field_name, payload),
+            'average_reference': self._get_average_reference(
+                field_name,
+                payload,
+                current_time=current_time,
+            ),
             'guidance_bands': serialize_guidance_bands(field_name) if guidance_bands else None,
             'guidance_range': guidance_range,
             'ring_min_value': ring_profile['min_value'],
@@ -662,7 +703,11 @@ class RPiWatch:
             'decimal_places': display_metadata['decimal_places'],
             'title_label': display_metadata['title_label'],
             'unit_label': display_metadata['unit_label'],
-            'average_reference': self._get_average_reference(field_name, payload),
+            'average_reference': self._get_average_reference(
+                field_name,
+                payload,
+                current_time=current_time,
+            ),
             'value_color': self._get_metric_value_color(field_name, payload),
         }
 
@@ -704,21 +749,31 @@ class RPiWatch:
             # Main event loop
             frame_count = 0
             last_render_state = None
+            stale_after_seconds = self._get_stale_after_seconds()
 
             while self.running:
                 try:
                     loop_time = time.time()
-                    current_payload = self.metric_store.get_payload()
-                    current_value = self.metric_store.get_latest()
+                    current_payload = self.metric_store.get_payload(
+                        max_age_seconds=stale_after_seconds,
+                        current_time=loop_time,
+                    )
+                    current_value = self.metric_store.get_latest(
+                        max_age_seconds=stale_after_seconds,
+                        current_time=loop_time,
+                    )
                     layout_mode = self._get_layout_mode()
                     selected_metric = None
 
                     if layout_mode == 'pm_bars':
                         if current_payload:
-                            pm_snapshot = tuple(
-                                self.metric_store.get_field(field_name) or 0.0
-                                for field_name in ('pm_1_0', 'pm_2_5', 'pm_4_0', 'pm_10_0')
-                            )
+                            pm_snapshot_values = []
+                            for field_name in ('pm_1_0', 'pm_2_5', 'pm_4_0', 'pm_10_0'):
+                                try:
+                                    pm_snapshot_values.append(float(current_payload.get(field_name, 0.0)))
+                                except (TypeError, ValueError):
+                                    pm_snapshot_values.append(0.0)
+                            pm_snapshot = tuple(pm_snapshot_values)
                             render_state = ('pm_bars', pm_snapshot)
 
                             if render_state != last_render_state:
@@ -736,7 +791,7 @@ class RPiWatch:
 
                             if render_state != last_render_state:
                                 logger.info(
-                                    "Displaying placeholder metric until first MQTT update: %s",
+                                    "Displaying placeholder metric while MQTT data is unavailable: %s",
                                     placeholder_metric['text'],
                                 )
                                 self._display_metric_value(
@@ -793,7 +848,7 @@ class RPiWatch:
 
                             if render_state != last_render_state:
                                 logger.info(
-                                    "Displaying placeholder metric until first MQTT update: %s",
+                                    "Displaying placeholder metric while MQTT data is unavailable: %s",
                                     placeholder_metric['text'],
                                 )
                                 self._display_metric_value(
@@ -809,7 +864,10 @@ class RPiWatch:
                             current_time=loop_time,
                         )
                         if selected_metric is not None:
-                            sparkline_series = self._get_history_tail(selected_metric['field'])
+                            sparkline_series = self._get_history_tail(
+                                selected_metric['field'],
+                                current_time=loop_time,
+                            )
                             sparkline_state = tuple(round(value, 3) for _, value in sparkline_series)
                             render_state = (
                                 'metric',
@@ -844,7 +902,10 @@ class RPiWatch:
                         elif current_value is not None:
                             display_metadata = self._get_display_metadata(self._get_preferred_metric_field())
                             sparkline_field = display_metadata['field'] or self._get_preferred_metric_field() or 'value'
-                            sparkline_series = self._get_history_tail(sparkline_field)
+                            sparkline_series = self._get_history_tail(
+                                sparkline_field,
+                                current_time=loop_time,
+                            )
                             sparkline_state = tuple(round(value, 3) for _, value in sparkline_series)
                             render_state = (
                                 'scalar',
@@ -878,7 +939,7 @@ class RPiWatch:
 
                             if render_state != last_render_state:
                                 logger.info(
-                                    "Displaying placeholder metric until first MQTT update: %s",
+                                    "Displaying placeholder metric while MQTT data is unavailable: %s",
                                     placeholder_metric['text'],
                                 )
                                 self._display_metric_value(

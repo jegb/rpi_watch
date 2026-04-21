@@ -89,6 +89,31 @@ class TestMetricStore(unittest.TestCase):
         age = self.store.get_age_seconds()
         self.assertIsNone(age)
 
+    def test_stale_value_is_hidden_from_live_reads(self):
+        """Stale samples should stop surfacing through the live getters."""
+        self.store.update_payload(
+            {"pm_2_5": "42.5", "temp": "26.2"},
+            timestamp=100.0,
+            preferred_field="pm_2_5",
+        )
+
+        self.assertEqual(
+            self.store.get_latest(max_age_seconds=300.0, current_time=400.0),
+            42.5,
+        )
+        self.assertIsNone(
+            self.store.get_latest(max_age_seconds=300.0, current_time=401.0)
+        )
+        self.assertIsNone(
+            self.store.get_payload(max_age_seconds=300.0, current_time=401.0)
+        )
+        self.assertFalse(
+            self.store.has_value(max_age_seconds=300.0, current_time=401.0)
+        )
+        self.assertTrue(
+            self.store.is_stale(max_age_seconds=300.0, current_time=401.0)
+        )
+
     def test_has_value(self):
         """Test has_value method."""
         self.assertFalse(self.store.has_value())
@@ -171,6 +196,90 @@ class TestMetricStore(unittest.TestCase):
             self.store.get_field_history("temp", limit=2),
             [(101.0, 26.8), (102.0, 26.4)],
         )
+
+    def test_get_field_history_keeps_only_latest_continuous_run(self):
+        """Field history should drop earlier segments once the gap exceeds the timeout."""
+        self.store.update_payload(
+            {"pm_2_5": "8.0"},
+            timestamp=100.0,
+            preferred_field="pm_2_5",
+        )
+        self.store.update_payload(
+            {"pm_2_5": "10.0"},
+            timestamp=160.0,
+            preferred_field="pm_2_5",
+        )
+        self.store.update_payload(
+            {"pm_2_5": "12.0"},
+            timestamp=600.0,
+            preferred_field="pm_2_5",
+        )
+        self.store.update_payload(
+            {"pm_2_5": "14.0"},
+            timestamp=660.0,
+            preferred_field="pm_2_5",
+        )
+
+        self.assertEqual(
+            self.store.get_field_history(
+                "pm_2_5",
+                max_gap_seconds=300.0,
+                max_age_seconds=300.0,
+                current_time=700.0,
+            ),
+            [(600.0, 12.0), (660.0, 14.0)],
+        )
+
+    def test_get_field_history_returns_empty_when_latest_segment_is_stale(self):
+        """Continuous history should disappear entirely after the latest sample ages out."""
+        self.store.update_payload(
+            {"pm_2_5": "8.0"},
+            timestamp=100.0,
+            preferred_field="pm_2_5",
+        )
+        self.store.update_payload(
+            {"pm_2_5": "10.0"},
+            timestamp=160.0,
+            preferred_field="pm_2_5",
+        )
+
+        self.assertEqual(
+            self.store.get_field_history(
+                "pm_2_5",
+                max_gap_seconds=300.0,
+                max_age_seconds=300.0,
+                current_time=461.0,
+            ),
+            [],
+        )
+
+    def test_get_field_average_uses_timestamps_from_continuous_samples(self):
+        """Local averages should be weighted by the live sample durations."""
+        self.store.update_payload(
+            {"pm_2_5": "10.0"},
+            timestamp=100.0,
+            preferred_field="pm_2_5",
+        )
+        self.store.update_payload(
+            {"pm_2_5": "20.0"},
+            timestamp=110.0,
+            preferred_field="pm_2_5",
+        )
+        self.store.update_payload(
+            {"pm_2_5": "30.0"},
+            timestamp=170.0,
+            preferred_field="pm_2_5",
+        )
+
+        average_value = self.store.get_field_average(
+            "pm_2_5",
+            max_gap_seconds=300.0,
+            max_age_seconds=300.0,
+            current_time=200.0,
+        )
+
+        self.assertIsNotNone(average_value)
+        self.assertAlmostEqual(average_value, 22.0)
 
     def test_scalar_updates_record_history_without_payload(self):
         """Test scalar-only updates still produce history entries."""
